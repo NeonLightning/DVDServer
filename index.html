@@ -1,0 +1,2296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DVD Server</title>
+    <link rel="stylesheet" href="themes.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .container { display: flex; height: 100vh; }
+
+        .sidebar {
+            width: 300px;
+            background: var(--panel);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            padding: 20px;
+            flex-shrink: 0;
+            box-shadow: var(--sidebar-shadow);
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            min-width: 0;
+        }
+
+        h1 { font-size: 24px; margin-bottom: 20px; color: var(--text-bright); }
+
+        h2 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 15px 0 10px 0;
+            color: var(--text-dim);
+        }
+
+        /* ============================================================
+           DVD LIST
+           ============================================================ */
+
+        .dvd-list { list-style: none; }
+
+        .genre-header {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-dim);
+            padding: 10px 4px 6px 4px;
+            border-bottom: 1px solid var(--border-soft);
+            margin-bottom: 8px;
+            margin-top: 6px;
+            list-style: none;
+            font-weight: 600;
+            user-select: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: color 0.15s;
+        }
+        .genre-header:first-child { margin-top: 0; }
+        .genre-header:hover { color: var(--text); }
+        .genre-header:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+            border-radius: 3px;
+        }
+
+        .genre-chevron {
+            display: inline-block;
+            width: 10px;
+            font-size: 9px;
+            text-align: center;
+            flex-shrink: 0;
+            color: var(--text-faint);
+            transition: transform 0.2s ease, color 0.15s;
+        }
+        .genre-header.expanded .genre-chevron { transform: rotate(90deg); }
+        .genre-header:hover .genre-chevron { color: var(--accent); }
+
+        .genre-header .genre-label {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .genre-header .genre-count {
+            color: var(--text-faint);
+            font-weight: 400;
+            flex-shrink: 0;
+        }
+
+        .dvd-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            background: var(--card);
+            margin-bottom: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+            min-width: 0;
+        }
+
+        .dvd-item:hover { background: var(--card-hover); border-left-color: var(--accent); }
+        .dvd-item.active { background: var(--card-active); border-left-color: var(--accent); }
+
+        .dvd-thumb {
+            width: 46px;
+            height: 46px;
+            border-radius: 4px;
+            overflow: hidden;
+            flex-shrink: 0;
+            background: var(--video-bg);
+            border: 1px solid var(--border-soft);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            line-height: 1;
+            color: var(--text-faint);
+        }
+
+        .dvd-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .dvd-thumb.dvd-thumb-empty { font-size: 22px; }
+
+        .dvd-name {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            overflow: hidden;
+        }
+
+        .dvd-name-main {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text);
+        }
+
+        .dvd-name-sub {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 11px;
+            color: var(--text-dim);
+            line-height: 1.2;
+        }
+
+        /* ============================================================
+           SETTINGS PANEL
+           ============================================================ */
+
+        .settings-panel {
+            margin-top: 20px;
+            border-top: 1px solid var(--border);
+            padding-top: 15px;
+        }
+
+        .setting-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .setting-row label {
+            font-size: 12px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            flex-shrink: 0;
+        }
+
+        /* ============================================================
+           CACHE PANEL
+           ============================================================ */
+
+        .cache-panel {
+            margin-top: 20px;
+            border-top: 1px solid var(--border);
+            padding-top: 15px;
+        }
+
+        .cache-list {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-bottom: 10px;
+            max-height: 260px;
+            overflow-y: auto;
+        }
+
+        .cache-empty {
+            color: var(--text-faint);
+            padding: 8px;
+            text-align: center;
+        }
+
+        .cache-total {
+            padding: 6px 8px;
+            font-size: 12px;
+            color: var(--text);
+            font-weight: 600;
+            margin-bottom: 6px;
+            background: var(--panel);
+            border: 1px solid var(--border-soft);
+            border-radius: 4px;
+        }
+
+        .cache-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 8px;
+            background: var(--card);
+            border-radius: 4px;
+            margin-bottom: 4px;
+            gap: 6px;
+        }
+
+        .cache-row .cache-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+            color: var(--text);
+        }
+
+        .cache-row .cache-size {
+            color: var(--text-mono);
+            font-variant-numeric: tabular-nums;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+
+        .cache-row .cache-clear {
+            background: transparent;
+            border: 1px solid var(--danger-border);
+            color: var(--danger);
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+
+        .cache-row .cache-clear:hover {
+            background: var(--danger-hover-bg);
+            border-color: var(--danger-border-hover);
+            color: var(--danger-hover-text);
+        }
+
+        .cache-button {
+            width: 100%;
+            padding: 10px 14px;
+            background: var(--card);
+            border: 1px solid var(--border-soft);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .cache-button:hover { background: var(--card-hover); border-color: var(--accent); }
+        .cache-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ============================================================
+           PLAYER SECTION
+           ============================================================ */
+
+        .player-section {
+            flex: 1;
+            display: flex;
+            gap: 20px;
+            min-height: 0;
+        }
+
+        .video-column {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-width: 0;
+        }
+
+        .title-bar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            background: var(--panel);
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+
+        .title-bar label {
+            font-size: 13px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            flex-shrink: 0;
+        }
+
+        .title-select {
+            flex: 1;
+            padding: 8px 10px;
+            background: var(--card);
+            color: var(--text);
+            border: 1px solid var(--border-soft);
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            min-width: 0;
+        }
+
+        .title-select:focus { outline: none; border-color: var(--accent); }
+        .title-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .video-player {
+            flex: 1;
+            background: var(--video-bg);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            min-height: 0;
+            position: relative;
+            transition: box-shadow 0.2s;
+        }
+
+        .video-player video {
+            width: 100%;
+            height: 100%;
+            background: var(--video-bg);
+            display: block;
+            cursor: pointer;
+        }
+
+        .video-player.controls-hidden video { cursor: none; }
+
+        video::cue {
+            background: rgba(0, 0, 0, 0.75);
+            color: #fff;
+            font-size: 1.1em;
+            text-shadow: 1px 1px 2px #000;
+        }
+
+        .cover-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 8;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 22px;
+            padding: 26px;
+            background: var(--video-bg);
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+
+        .cover-overlay.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .cover-art {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 10px;
+            overflow: hidden;
+            background: var(--video-bg);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+            border: 1px solid var(--border-soft);
+            max-width: 60%;
+            max-height: 58%;
+        }
+
+        .cover-art img {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+        }
+
+        .cover-placeholder {
+            width: 300px;
+            height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 96px;
+            color: var(--text-faint);
+            background: var(--video-bg);
+        }
+
+        .cover-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            text-align: center;
+            max-width: 90%;
+        }
+
+        .cover-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-bright);
+            margin: 0;
+            word-break: break-word;
+        }
+
+        .cover-title-main { color: var(--text-bright); }
+
+        .cover-title-sub {
+            font-size: 14px;
+            font-weight: 400;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+
+        .cover-meta {
+            font-size: 13px;
+            color: var(--text-dim);
+            margin: 0;
+        }
+
+        .play-dvd-btn {
+            margin-top: 6px;
+            padding: 12px 32px;
+            background: var(--accent);
+            color: var(--text-bright);
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: filter 0.2s, transform 0.05s, box-shadow 0.2s;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+
+        .play-dvd-btn:hover { filter: brightness(1.12); }
+        .play-dvd-btn:active { transform: scale(0.97); }
+        .play-dvd-btn:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+        .player-controls {
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            padding: 8px 14px 10px 14px;
+            background: linear-gradient(
+                to top,
+                var(--player-bar-bg) 0%,
+                var(--player-bar-bg) 70%,
+                transparent 100%
+            );
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--player-text);
+            font-family: var(--player-font);
+            font-size: 13px;
+            opacity: 1;
+            transform: translateY(0);
+            transition: opacity 0.2s, transform 0.2s;
+            pointer-events: auto;
+            z-index: 5;
+        }
+
+        .video-player.controls-hidden .player-controls {
+            opacity: 0;
+            transform: translateY(8px);
+            pointer-events: none;
+        }
+
+        .ctrl-btn {
+            background: transparent;
+            border: none;
+            color: var(--player-text);
+            padding: 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s, color 0.15s;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+
+        .ctrl-btn:hover { background: var(--player-btn-hover); }
+        .ctrl-btn:focus { outline: 2px solid var(--player-progress-played); outline-offset: 2px; }
+        .ctrl-btn svg { display: block; }
+
+        .ctrl-time {
+            color: var(--player-text-dim);
+            font-variant-numeric: tabular-nums;
+            font-size: 12px;
+            flex-shrink: 0;
+            min-width: 90px;
+            text-align: center;
+            user-select: none;
+        }
+
+        .ctrl-progress {
+            flex: 1;
+            height: var(--player-progress-height);
+            background: var(--player-progress-bg);
+            border-radius: var(--player-radius);
+            position: relative;
+            cursor: pointer;
+            transition: height 0.15s;
+            min-width: 0;
+        }
+
+        .ctrl-progress:hover { height: var(--player-progress-height-hover); }
+
+        .ctrl-progress-buffered {
+            position: absolute;
+            top: 0; left: 0; bottom: 0;
+            background: var(--player-progress-buffered);
+            border-radius: var(--player-radius);
+            pointer-events: none;
+        }
+
+        .ctrl-progress-played {
+            position: absolute;
+            top: 0; left: 0; bottom: 0;
+            background: var(--player-progress-played);
+            border-radius: var(--player-radius);
+            pointer-events: none;
+        }
+
+        .ctrl-progress-knob {
+            position: absolute;
+            top: 50%;
+            width: var(--player-knob-size);
+            height: var(--player-knob-size);
+            border-radius: 50%;
+            background: var(--player-progress-played);
+            transform: translate(-50%, -50%) scale(0);
+            transition: transform 0.15s;
+            pointer-events: none;
+            box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .ctrl-progress:hover .ctrl-progress-knob { transform: translate(-50%, -50%) scale(1); }
+
+        .ctrl-volume {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 80px;
+            height: 4px;
+            background: var(--player-progress-bg);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .ctrl-volume::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--player-text);
+            cursor: pointer;
+            transition: transform 0.15s;
+        }
+
+        .ctrl-volume::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--player-text);
+            cursor: pointer;
+            border: none;
+            transition: transform 0.15s;
+        }
+
+        .ctrl-volume:hover::-webkit-slider-thumb { transform: scale(1.25); }
+        .ctrl-volume:hover::-moz-range-thumb { transform: scale(1.25); }
+
+        .toggle-group {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            user-select: none;
+            font-size: 12px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .toggle input { display: none; }
+
+        .toggle .track {
+            width: 34px;
+            height: 18px;
+            background: var(--toggle-off);
+            border-radius: 9px;
+            position: relative;
+            transition: background 0.2s;
+        }
+
+        .toggle .track::after {
+            content: "";
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--toggle-knob);
+            transition: all 0.2s;
+        }
+
+        .toggle input:checked + .track { background: var(--accent-dim); }
+        .toggle input:checked + .track::after { left: 18px; background: var(--accent); }
+        .toggle:hover .track { border: 1px solid var(--accent); }
+
+        .dim-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.78);
+            z-index: 9000;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.25s;
+        }
+
+        body.dimmed .dim-overlay { opacity: 1; }
+
+        body.dimmed .video-player {
+            position: relative;
+            z-index: 9100;
+            box-shadow: 0 0 80px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.08);
+        }
+
+        .menu-panel {
+            width: 350px;
+            background: var(--panel);
+            border-radius: 8px;
+            padding: 20px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .menu-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: var(--accent);
+            flex-shrink: 0;
+        }
+
+        .menu-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            flex: 1;
+        }
+
+        .menu-button {
+            padding: 10px 14px;
+            background: var(--card);
+            border: 2px solid var(--border-soft);
+            border-radius: 6px;
+            color: var(--text);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            text-align: left;
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: baseline;
+        }
+
+        .menu-button:hover { background: var(--card-hover); border-color: var(--accent); }
+
+        .menu-button.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--text-bright);
+            font-weight: 600;
+        }
+
+        .menu-button .chap-title {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .menu-button .chap-time {
+            font-size: 11px;
+            color: var(--text-mono);
+            font-variant-numeric: tabular-nums;
+            flex-shrink: 0;
+        }
+
+        .menu-button.active .chap-time { color: var(--accent-soft); }
+
+        .status {
+            padding: 12px;
+            background: var(--card);
+            border-radius: 6px;
+            font-size: 13px;
+            margin-top: 15px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            width: 100%;
+            color: var(--text-faint);
+        }
+
+        .empty-state p { font-size: 18px; margin-bottom: 10px; }
+
+        .error {
+            padding: 12px;
+            background: var(--danger-bg);
+            border-left: 3px solid var(--danger);
+            border-radius: 4px;
+            color: var(--danger-text);
+            margin-bottom: 10px;
+        }
+
+        .success {
+            padding: 12px;
+            background: var(--success-bg);
+            border-left: 3px solid var(--success);
+            border-radius: 4px;
+            color: var(--success-text);
+            margin-bottom: 10px;
+        }
+
+        .info {
+            padding: 12px;
+            background: var(--accent-bg);
+            border-left: 3px solid var(--accent);
+            border-radius: 4px;
+            color: var(--accent-text);
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body class="theme-terminal">
+    <div class="dim-overlay" id="dimOverlay"></div>
+
+    <div class="container">
+        <div class="sidebar">
+            <h1>📀 DVD Server</h1>
+
+            <h2>Library</h2>
+            <ul class="dvd-list" id="dvdList"></ul>
+
+            <div class="status" id="connectionStatus">Connecting...</div>
+
+            <div class="settings-panel">
+                <h2>Settings</h2>
+                <div class="setting-row">
+                    <label for="themeSelect">Theme</label>
+                    <select id="themeSelect" class="title-select"></select>
+                </div>
+                <label class="toggle" title="Dim everything except the video">
+                    <input type="checkbox" id="dimToggle">
+                    <span class="track"></span>
+                    <span>Dim UI</span>
+                </label>
+            </div>
+
+            <div class="cache-panel">
+                <h2>Cache</h2>
+                <div id="cacheList" class="cache-list">Loading...</div>
+                <button id="clearAllCacheBtn" class="cache-button">Clear All</button>
+
+                <h2 style="margin-top: 15px;">Auto-Clear Cache</h2>
+                <div class="setting-row">
+                    <label>
+                        <input type="radio" name="cacheMode" value="none" checked>
+                        Never (Manual only)
+                    </label>
+                </div>
+                <div class="setting-row">
+                    <label>
+                        <input type="radio" name="cacheMode" value="on_end">
+                        On File End
+                    </label>
+                </div>
+                <div class="setting-row">
+                    <label>
+                        <input type="radio" name="cacheMode" value="on_dvd_change">
+                        On DVD Change
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div id="messageArea"></div>
+
+            <div class="player-section" id="playerSection">
+                <div class="empty-state">
+                    <p>👈 Select a DVD to start</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "/api";
+        let currentDVD = null;
+        let currentTitleIdx = 0;
+        let chapters = [];
+        let activeChapterIdx = -1;
+        let currentSubtitles = [];
+        let currentAudio = [];
+        let prewarmedTitles = new Set();
+        let lastGoodTime = 0;
+        let loadedAudioIdx = 0;
+        let titleOrder = [];
+
+        // Which genres are expanded. Persisted across reloads.
+        // Empty array = every genre collapsed on first run.
+        let expandedGenres = (() => {
+            try {
+                const saved = localStorage.getItem("expandedGenres");
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (Array.isArray(parsed)) return parsed;
+                }
+            } catch (e) { /* corrupt storage — ignore */ }
+            return [];
+        })();
+
+        let sortMode = localStorage.getItem("sortMode") || "name";
+        let autoplayNext = localStorage.getItem("autoplayNext") === "1";
+        let isVideoPlaying = false;
+        let cacheMode = localStorage.getItem("cacheMode") || "none";
+        let themeName = localStorage.getItem("theme") || "terminal";
+        let dimmed = localStorage.getItem("dimmed") === "1";
+        let coverVisible = false;
+
+        // ---------- URL encoding for path-like DVD names ----------
+        // Encodes each segment separately so "/" is preserved as a real
+        // path separator (Flask's <path:...> converter needs it).
+        function encodePath(p) {
+            return String(p).split("/").map(encodeURIComponent).join("/");
+        }
+
+        // ---------- DVD name splitting ----------
+
+        function splitDvdName(name) {
+            const idx = name.lastIndexOf("(");
+            if (idx <= 0) return { main: name, sub: "" };
+            const main = name.slice(0, idx).trim();
+            const sub  = name.slice(idx).trim();
+            if (!main) return { main: name, sub: "" };
+            return { main, sub };
+        }
+
+        function buildDvdNameEl(name) {
+            const container = document.createElement("div");
+            container.className = "dvd-name";
+            container.title = name;
+
+            const { main, sub } = splitDvdName(name);
+
+            const mainEl = document.createElement("div");
+            mainEl.className = "dvd-name-main";
+            mainEl.textContent = main;
+            container.appendChild(mainEl);
+
+            if (sub) {
+                const subEl = document.createElement("div");
+                subEl.className = "dvd-name-sub";
+                subEl.textContent = sub;
+                container.appendChild(subEl);
+            }
+            return container;
+        }
+
+        // ---------- Theme / dim ----------
+
+        function applyTheme(name) {
+            document.body.className = document.body.className
+                .split(" ")
+                .filter(c => !c.startsWith("theme-") && c !== "dimmed")
+                .join(" ")
+                .trim();
+            document.body.classList.add(`theme-${name}`);
+            if (dimmed) document.body.classList.add("dimmed");
+        }
+
+        function applyDim(on) {
+            document.body.classList.toggle("dimmed", on);
+        }
+
+        // ---------- Theme discovery ----------
+
+        function discoverThemes() {
+            const themes = [];
+            const seen = new Set();
+
+            for (const sheet of document.styleSheets) {
+                let rules;
+                try { rules = sheet.cssRules; }
+                catch (e) { continue; }
+
+                for (const rule of rules) {
+                    if (!rule.selectorText) continue;
+                    const matches = rule.selectorText.match(/body\.theme-([a-z0-9_-]+)/g);
+                    if (!matches) continue;
+
+                    for (const sel of matches) {
+                        const id = sel.replace("body.theme-", "");
+                        if (seen.has(id)) continue;
+                        seen.add(id);
+
+                        let label = "";
+                        try {
+                            label = rule.style
+                                .getPropertyValue("--theme-name")
+                                .trim()
+                                .replace(/^["']|["']$/g, "");
+                        } catch (e) { }
+
+                        if (!label) {
+                            label = id.replace(/[-_]/g, " ")
+                                      .replace(/\b\w/g, c => c.toUpperCase());
+                        }
+
+                        themes.push({ id, label });
+                    }
+                }
+            }
+
+            return themes;
+        }
+
+        // ---------- Helpers ----------
+
+        function fmtTime(sec) {
+            if (!isFinite(sec) || sec < 0) return "0:00";
+            sec = Math.floor(sec);
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = sec % 60;
+            if (h > 0) {
+                return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+            }
+            return `${m}:${String(s).padStart(2, "0")}`;
+        }
+
+        function fmtBytes(bytes) {
+            if (!bytes || bytes <= 0) return "0 B";
+            const units = ["B", "KB", "MB", "GB", "TB"];
+            const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+            const value = bytes / Math.pow(1024, i);
+            return i === 0 ? `${Math.round(value)} B` : `${value.toFixed(1)} ${units[i]}`;
+        }
+
+        function fmtDuration(sec) {
+            if (!isFinite(sec) || sec <= 0) return "unknown";
+            const h = Math.floor(sec / 3600);
+            const m = Math.round((sec % 3600) / 60);
+            if (h > 0) return `${h}h ${m}m`;
+            return `${m}m`;
+        }
+
+        // ---------- DVD list (grouped by genre, collapsible) ----------
+
+        async function loadDVDList() {
+            try {
+                const response = await fetch(`${API_URL}/dvds`);
+                const data = await response.json();
+
+                const dvdList = document.getElementById("dvdList");
+                const previouslyActive = document.querySelector(".dvd-item.active")?.dataset.dvdName;
+                dvdList.innerHTML = "";
+
+                if (!data.genres || data.genres.length === 0) {
+                    dvdList.innerHTML = "<li class='dvd-item'>No DVDs found. Rip some with ripper.py</li>";
+                    updateConnectionStatus("No DVDs");
+                    return;
+                }
+
+                data.genres.forEach(genre => {
+                    const gname = genre.name || "";
+                    const isExpanded = expandedGenres.indexOf(gname) >= 0;
+
+                    const header = document.createElement("li");
+                    header.className = "genre-header" + (isExpanded ? " expanded" : "");
+                    header.dataset.genreName = gname;
+                    header.setAttribute("role", "button");
+                    header.setAttribute("tabindex", "0");
+                    header.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+                    header.title = isExpanded ? "Click to collapse" : "Click to expand";
+
+                    const chevron = document.createElement("span");
+                    chevron.className = "genre-chevron";
+                    chevron.textContent = "▶";
+                    header.appendChild(chevron);
+
+                    const labelEl = document.createElement("span");
+                    labelEl.className = "genre-label";
+                    labelEl.textContent = genre.label;
+                    header.appendChild(labelEl);
+
+                    const countEl = document.createElement("span");
+                    countEl.className = "genre-count";
+                    countEl.textContent = `(${genre.dvds.length})`;
+                    header.appendChild(countEl);
+
+                    const nameForClick = gname;
+                    header.onclick = () => toggleGenre(nameForClick);
+                    header.onkeydown = (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggleGenre(nameForClick);
+                        }
+                    };
+
+                    dvdList.appendChild(header);
+
+                    genre.dvds.forEach(dvd => {
+                        const li = document.createElement("li");
+                        li.className = "dvd-item";
+                        li.dataset.dvdName = dvd.name;
+                        li.dataset.genreName = gname;
+
+                        if (!isExpanded) li.style.display = "none";
+
+                        const thumb = document.createElement("div");
+                        thumb.className = "dvd-thumb";
+
+                        if (dvd.cover) {
+                            const img = document.createElement("img");
+                            img.src = dvd.cover;
+                            img.alt = "";
+                            img.loading = "lazy";
+                            img.addEventListener("error", () => {
+                                img.remove();
+                                thumb.classList.add("dvd-thumb-empty");
+                                thumb.textContent = "📀";
+                            });
+                            thumb.appendChild(img);
+                        } else {
+                            thumb.classList.add("dvd-thumb-empty");
+                            thumb.textContent = "📀";
+                        }
+
+                        const nameEl = buildDvdNameEl(dvd.display_name);
+                        if (dvd.subpath) {
+                            nameEl.title = `${dvd.name}`;
+                        }
+
+                        li.appendChild(thumb);
+                        li.appendChild(nameEl);
+                        li.onclick = () => loadDVD(dvd.name);
+                        if (dvd.name === previouslyActive) li.classList.add("active");
+                        dvdList.appendChild(li);
+                    });
+                });
+
+                updateConnectionStatus("Connected");
+            } catch (error) {
+                console.error("Error loading DVDs:", error);
+                updateConnectionStatus("Connection failed");
+            }
+        }
+
+        function toggleGenre(genreName) {
+            genreName = genreName || "";
+            const idx = expandedGenres.indexOf(genreName);
+            const isNowExpanded = idx === -1;
+
+            if (isNowExpanded) expandedGenres.push(genreName);
+            else expandedGenres.splice(idx, 1);
+
+            try {
+                localStorage.setItem("expandedGenres", JSON.stringify(expandedGenres));
+            } catch (e) { /* private mode, etc. */ }
+
+            document.querySelectorAll(".genre-header").forEach(h => {
+                if ((h.dataset.genreName || "") !== genreName) return;
+                h.classList.toggle("expanded", isNowExpanded);
+                h.setAttribute("aria-expanded", isNowExpanded ? "true" : "false");
+                h.title = isNowExpanded ? "Click to collapse" : "Click to expand";
+            });
+            document.querySelectorAll(".dvd-item").forEach(item => {
+                if ((item.dataset.genreName || "") !== genreName) return;
+                item.style.display = isNowExpanded ? "" : "none";
+            });
+        }
+
+        // ---------- Load a DVD ----------
+
+        async function loadDVD(dvdName) {
+            try {
+                unloadVideo();
+                await new Promise(r => setTimeout(r, 80));
+
+                if (cacheMode === "on_dvd_change" && currentDVD && currentDVD.title) {
+                    console.log(`[Cache] Switching DVD - clearing cache for ${currentDVD.title}`);
+                    await clearCacheForDVD(currentDVD.title, true);
+                }
+
+                showMessage("Loading DVD...", "info");
+
+                const response = await fetch(`${API_URL}/dvd/load/${encodePath(dvdName)}`, {
+                    method: "POST"
+                });
+
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({ error: "Unknown error" }));
+                    showMessage(`Error: ${error.error}`, "error");
+                    return;
+                }
+
+                currentDVD = await response.json();
+                prewarmedTitles = new Set();
+                computeTitleOrder();
+
+                document.querySelectorAll(".dvd-item").forEach(item => {
+                    item.classList.toggle("active", item.dataset.dvdName === dvdName);
+                });
+
+                renderPlayer();
+                selectTitle(titleOrder[0]);
+                loadCacheInfo();
+
+                showMessage(
+                    `Loaded: ${dvdName} — ${currentDVD.titles.length} title(s)`,
+                    "success"
+                );
+            } catch (error) {
+                console.error("Error loading DVD:", error);
+                showMessage("Failed to load DVD", "error");
+            }
+        }
+
+        function computeTitleOrder() {
+            if (!currentDVD) { titleOrder = []; return; }
+            const idxs = currentDVD.titles.map((_, i) => i);
+            const t = currentDVD.titles;
+
+            if (sortMode === "shortest") {
+                idxs.sort((a, b) => (t[a].duration || 0) - (t[b].duration || 0));
+            } else if (sortMode === "longest") {
+                idxs.sort((a, b) => (t[b].duration || 0) - (t[a].duration || 0));
+            } else if (sortMode === "size") {
+                idxs.sort((a, b) => (t[a].size || 0) - (t[b].size || 0));
+            } else {
+                idxs.sort((a, b) =>
+                    t[a].file.localeCompare(t[b].file, undefined, { numeric: true })
+                );
+            }
+            titleOrder = idxs;
+        }
+
+        // ---------- Render player skeleton ----------
+
+        function renderPlayer() {
+            const playerSection = document.getElementById("playerSection");
+            playerSection.innerHTML = `
+                <div class="video-column">
+                    <div class="title-bar">
+                        <label for="titleSelect">Title</label>
+                        <select id="titleSelect" class="title-select"></select>
+                        <label for="audioSelect">Audio</label>
+                        <select id="audioSelect" class="title-select" style="max-width: 180px;"></select>
+                        <label for="subtitleSelect">Subs</label>
+                        <select id="subtitleSelect" class="title-select" style="max-width: 180px;"></select>
+                        <div class="toggle-group">
+                            <label for="sortSelect">Sort</label>
+                            <select id="sortSelect" class="title-select" style="max-width: 140px;">
+                                <option value="name">Name</option>
+                                <option value="shortest">Shortest first</option>
+                                <option value="longest">Longest first</option>
+                                <option value="size">Smallest file</option>
+                            </select>
+                            <label class="toggle" title="Automatically play the next title when this one ends">
+                                <input type="checkbox" id="autoplayToggle" ${autoplayNext ? "checked" : ""}>
+                                <span class="track"></span>
+                                <span>Autoplay</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="video-player" id="videoPlayerContainer">
+                        <video id="videoPlayer" preload="metadata">
+                            Your browser doesn't support HTML5 video.
+                        </video>
+                        <div class="player-controls" id="playerControls">
+                            <button class="ctrl-btn" id="playPauseBtn" title="Play/Pause (Space)">
+                                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                                    <path d="M8 5v14l11-7z" fill="currentColor"/>
+                                </svg>
+                            </button>
+                            <span class="ctrl-time" id="timeDisplay">0:00 / 0:00</span>
+                            <div class="ctrl-progress" id="progressBar">
+                                <div class="ctrl-progress-buffered" id="bufferedBar"></div>
+                                <div class="ctrl-progress-played" id="playedBar"></div>
+                                <div class="ctrl-progress-knob" id="progressKnob"></div>
+                            </div>
+                            <button class="ctrl-btn" id="muteBtn" title="Mute (M)">
+                                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" fill="currentColor"/>
+                                </svg>
+                            </button>
+                            <input type="range" class="ctrl-volume" id="volumeSlider" min="0" max="1" step="0.05" value="1" title="Volume">
+                            <button class="ctrl-btn" id="fullscreenBtn" title="Fullscreen (F)">
+                                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                                    <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="cover-overlay" id="coverOverlay">
+                            <div class="cover-art" id="coverArt">
+                                <img id="coverImg" alt="">
+                                <div class="cover-placeholder" id="coverPlaceholder" style="display:none;">📀</div>
+                            </div>
+                            <div class="cover-info">
+                                <div class="cover-title" id="coverTitle"></div>
+                                <p class="cover-meta" id="coverMeta"></p>
+                            </div>
+                            <button class="play-dvd-btn" id="playDvdBtn" type="button">
+                                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                                    <path d="M8 5v14l11-7z" fill="currentColor"/>
+                                </svg>
+                                <span>Play</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="menu-panel">
+                    <div class="menu-title" id="menuTitle">Chapters</div>
+                    <div class="menu-buttons" id="menuButtons"></div>
+                    <div class="status" id="playingStatus">Select a chapter to jump</div>
+                </div>
+            `;
+
+            setupCoverOverlay();
+
+            populateTitleSelect();
+            document.getElementById("titleSelect").onchange =
+                (e) => selectTitle(parseInt(e.target.value, 10));
+
+            const sortEl = document.getElementById("sortSelect");
+            sortEl.value = sortMode;
+            sortEl.onchange = (e) => {
+                sortMode = e.target.value;
+                localStorage.setItem("sortMode", sortMode);
+                computeTitleOrder();
+                populateTitleSelect();
+            };
+
+            const autoEl = document.getElementById("autoplayToggle");
+            autoEl.onchange = (e) => {
+                autoplayNext = e.target.checked;
+                localStorage.setItem("autoplayNext", autoplayNext ? "1" : "0");
+            };
+
+            const video = document.getElementById("videoPlayer");
+            video.addEventListener("timeupdate", onTimeUpdate);
+            video.addEventListener("play", onVideoPlay);
+            video.addEventListener("pause", onVideoPause);
+            video.addEventListener("ended", onVideoEnded);
+            video.addEventListener("error", onVideoError);
+
+            populateAudioSelect();
+            populateSubtitleSelect();
+            setupCustomControls();
+
+            coverVisible = true;
+        }
+
+        function setupCoverOverlay() {
+            if (!currentDVD) return;
+            const dvdName = currentDVD.title;
+            const coverUrl = `${API_URL}/dvd/cover/${encodePath(dvdName)}`;
+
+            const img = document.getElementById("coverImg");
+            const placeholder = document.getElementById("coverPlaceholder");
+            const titleEl = document.getElementById("coverTitle");
+            const metaEl = document.getElementById("coverMeta");
+
+            const shortName = dvdName.split("/").pop() || dvdName;
+
+            titleEl.innerHTML = "";
+            const { main, sub } = splitDvdName(shortName);
+            const mainEl = document.createElement("div");
+            mainEl.className = "cover-title-main";
+            mainEl.textContent = main;
+            titleEl.appendChild(mainEl);
+            if (sub) {
+                const subEl = document.createElement("div");
+                subEl.className = "cover-title-sub";
+                subEl.textContent = sub;
+                titleEl.appendChild(subEl);
+            }
+
+            metaEl.textContent = "";
+
+            img.alt = `${shortName} cover`;
+            img.src = coverUrl;
+
+            const showPlaceholder = () => {
+                img.style.display = "none";
+                placeholder.style.display = "flex";
+            };
+
+            img.addEventListener("error", showPlaceholder);
+            if (img.complete && img.naturalWidth === 0) showPlaceholder();
+
+            document.getElementById("playDvdBtn").onclick = startPlayback;
+        }
+
+        function updateCoverMeta() {
+            if (!currentDVD) return;
+            const metaEl = document.getElementById("coverMeta");
+            if (!metaEl) return;
+
+            if (coverVisible && currentDVD.titles && currentDVD.titles[currentTitleIdx]) {
+                const t = currentDVD.titles[currentTitleIdx];
+                const label = t.file.replace(/\.[^.]+$/, "");
+                const dur = fmtDuration(t.duration);
+                metaEl.textContent = `${label} · ${dur} · ${chapters.length} chapter${chapters.length === 1 ? "" : "s"}`;
+            } else {
+                metaEl.textContent = "";
+            }
+        }
+
+        function startPlayback() {
+            coverVisible = false;
+            const overlay = document.getElementById("coverOverlay");
+            if (overlay) overlay.classList.add("hidden");
+            const video = document.getElementById("videoPlayer");
+            if (video) video.play().catch(err => console.warn("Autoplay blocked:", err));
+        }
+
+        function populateTitleSelect() {
+            const select = document.getElementById("titleSelect");
+            if (!select || !currentDVD) return;
+            select.innerHTML = "";
+            titleOrder.forEach(serverIdx => {
+                const t = currentDVD.titles[serverIdx];
+                const opt = document.createElement("option");
+                opt.value = serverIdx;
+                const label = t.file.replace(/\.[^.]+$/, "");
+                opt.textContent = `${label}  (${fmtDuration(t.duration)})`;
+                select.appendChild(opt);
+            });
+            select.value = String(currentTitleIdx);
+        }
+
+        // ---------- Select a title ----------
+
+        async function selectTitle(idx) {
+            try {
+                const response = await fetch(`${API_URL}/dvd/title/${idx}`, {
+                    method: "POST"
+                });
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({ error: "Unknown error" }));
+                    showMessage(`Error: ${error.error}`, "error");
+                    return;
+                }
+                const data = await response.json();
+
+                currentTitleIdx = data.title_idx;
+                chapters = data.chapters || [];
+                activeChapterIdx = -1;
+                currentAudio = data.audio || [];
+                currentSubtitles = data.subtitles || [];
+
+                const video = document.getElementById("videoPlayer");
+                recoveringSrc = null;
+                loadedAudioIdx = 0;
+                video.src = data.stream_url;
+                video.load();
+
+                const select = document.getElementById("titleSelect");
+                if (select) select.value = String(currentTitleIdx);
+
+                document.getElementById("menuTitle").textContent =
+                    `Chapters — ${data.file.replace(/\.[^.]+$/, "")}`;
+                renderChapterButtons();
+
+                populateAudioSelect();
+                populateSubtitleSelect();
+
+                const statusDiv = document.getElementById("playingStatus");
+                statusDiv.textContent =
+                    `${chapters.length} chapter(s) · ${fmtDuration(data.duration)}`;
+
+                updateCoverMeta();
+            } catch (error) {
+                console.error("Error selecting title:", error);
+                showMessage("Failed to select title", "error");
+            }
+        }
+
+        // ---------- Autoplay next ----------
+
+        function onVideoEnded() {
+            if (cacheMode === "on_end" && currentDVD) {
+                console.log(`[Cache] Video ended - clearing cache for ${currentDVD.title}`);
+                clearCacheForDVD(currentDVD.title, true);
+            }
+
+            if (!autoplayNext) return;
+            if (!currentDVD || titleOrder.length === 0) return;
+
+            const pos = titleOrder.indexOf(currentTitleIdx);
+            if (pos === -1 || pos === titleOrder.length - 1) {
+                showMessage("End of titles.", "info");
+                return;
+            }
+            const nextIdx = titleOrder[pos + 1];
+            const nextName = currentDVD.titles[nextIdx].file.replace(/\.[^.]+$/, "");
+            showMessage(`Autoplay: ${nextName}`, "info");
+
+            selectTitle(nextIdx).then(() => {
+                const video = document.getElementById("videoPlayer");
+                video.play().catch(err => console.warn("Autoplay blocked:", err));
+            });
+        }
+
+        // ---------- Audio dropdown ----------
+
+        function populateAudioSelect() {
+            const sel = document.getElementById("audioSelect");
+            if (!sel) return;
+            sel.innerHTML = "";
+            loadedAudioIdx = 0;
+            if (!currentAudio || currentAudio.length === 0) {
+                const opt = document.createElement("option");
+                opt.value = "0";
+                opt.textContent = "(no audio info)";
+                sel.appendChild(opt);
+                sel.disabled = true;
+                return;
+            }
+
+            sel.disabled = false;
+            currentAudio.forEach(t => {
+                const opt = document.createElement("option");
+                opt.value = String(t.index);
+                opt.textContent = t.title;
+                if (!t.playable) {
+                    opt.textContent += " (not browser-playable)";
+                }
+                sel.appendChild(opt);
+            });
+
+            sel.onchange = (e) => setAudioTrack(parseInt(e.target.value, 10));
+            sel.value = String(loadedAudioIdx);
+        }
+
+        function onVideoPlay() {
+            isVideoPlaying = true;
+
+            const sel = document.getElementById("audioSelect");
+            if (sel) {
+                const chosen = parseInt(sel.value, 10) || 0;
+                if (chosen !== loadedAudioIdx) {
+                    console.log(`[Audio] Applying deferred track ${chosen} (loaded=${loadedAudioIdx}) on play`);
+                    applyAudioTrack(chosen);
+                }
+            }
+        }
+
+        function onVideoPause() {
+            isVideoPlaying = false;
+            console.log(`[Cache] Video paused`);
+        }
+
+        let recoveringSrc = null;
+
+        function onVideoError(e) {
+            const video = document.getElementById("videoPlayer");
+            if (!video || !video.error) return;
+
+            const code = video.error.code;
+            const msg = video.error.message || "";
+            console.warn(`Video error (code ${code}): ${msg}`);
+
+            if (code !== MediaError.MEDIA_ERR_NETWORK &&
+                code !== MediaError.MEDIA_ERR_DECODE) {
+                return;
+            }
+
+            const src = video.currentSrc || video.src;
+            if (recoveringSrc === src) {
+                console.warn("Already tried to recover this source; giving up");
+                showMessage("Playback failed. Click a chapter to try again.", "error");
+                return;
+            }
+            recoveringSrc = src;
+
+            const resumeAt = video.currentTime || 0;
+
+            setTimeout(() => {
+                if (recoveringSrc !== src) return;
+                video.load();
+                const restore = () => {
+                    video.removeEventListener("loadedmetadata", restore);
+                    if (resumeAt > 0) video.currentTime = resumeAt;
+                    video.play().catch(() => {});
+                };
+                video.addEventListener("loadedmetadata", restore);
+            }, 800);
+        }
+
+        function triggerPrewarm() {
+            if (!currentDVD) return;
+            const idx = currentTitleIdx;
+            if (prewarmedTitles.has(idx)) return;
+            prewarmedTitles.add(idx);
+
+            fetch(`${API_URL}/dvd/prewarm/${idx}`, { method: "POST" })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (data && data.started) {
+                        console.log(`Pre-warming ${data.tracks} alternate audio track(s) for title ${idx}`);
+                    }
+                })
+                .catch(err => console.warn("Prewarm request failed:", err));
+        }
+
+        function setAudioTrack(audioIdx) {
+            if (!isVideoPlaying) {
+                console.log(`[Audio] Track ${audioIdx} selected while paused — deferred until play`);
+                return;
+            }
+            applyAudioTrack(audioIdx);
+        }
+
+        function applyAudioTrack(audioIdx) {
+            const video = document.getElementById("videoPlayer");
+            if (!video) return;
+
+            const wasPlaying = !video.paused && !video.ended;
+            const pos = video.currentTime || 0;
+
+            const base = `${API_URL}/dvd/stream/${currentTitleIdx}`;
+            const url = audioIdx === 0 ? base : `${base}?audio=${audioIdx}`;
+
+            if (audioIdx > 0) {
+                console.log(`[Cache] POST /api/dvd/cache-track/${currentTitleIdx}/${audioIdx}`);
+                fetch(`${API_URL}/dvd/cache-track/${currentTitleIdx}/${audioIdx}`, { method: "POST" })
+                    .then(async r => {
+                        const body = await r.text();
+                        console.log(`[Cache] cache-track HTTP ${r.status} body=${body}`);
+                        return body ? JSON.parse(body) : null;
+                    })
+                    .then(data => {
+                        if (data && data.started) {
+                            console.log(`[Cache] Background caching audio track ${audioIdx} started`);
+                        } else {
+                            console.warn(`[Cache] cache-track did NOT start:`, data);
+                        }
+                    })
+                    .catch(err => console.error(`[Cache] cache-track failed:`, err));
+                showMessage("Switching audio — first play of this track may take a moment while it remuxes…", "info");
+            }
+
+            recoveringSrc = null;
+            video.src = url;
+            video.load();
+
+            const restore = () => {
+                video.removeEventListener("loadedmetadata", restore);
+                if (pos > 0) video.currentTime = pos;
+                if (wasPlaying) video.play().catch(() => {});
+                const subSel = document.getElementById("subtitleSelect");
+                if (subSel && subSel.value && subSel.value !== "off") {
+                    setSubtitle(subSel.value);
+                }
+            };
+            video.addEventListener("loadedmetadata", restore);
+
+            loadedAudioIdx = audioIdx;
+        }
+
+        // ---------- Subtitle dropdown ----------
+
+        function populateSubtitleSelect() {
+            const sel = document.getElementById("subtitleSelect");
+            if (!sel) return;
+            sel.innerHTML = "";
+
+            const off = document.createElement("option");
+            off.value = "off";
+            off.textContent = "Off";
+            sel.appendChild(off);
+
+            if (!currentSubtitles || currentSubtitles.length === 0) {
+                off.textContent = "Off (no subs)";
+                sel.disabled = true;
+                const video = document.getElementById("videoPlayer");
+                if (video) video.querySelectorAll("track").forEach(t => t.remove());
+                return;
+            }
+
+            sel.disabled = false;
+            currentSubtitles.forEach(t => {
+                const opt = document.createElement("option");
+                opt.value = t.id;
+                opt.textContent = t.title + (t.playable ? "" : " (not playable)");
+                if (!t.playable) opt.title = t.note || "Bitmap subtitle";
+                sel.appendChild(opt);
+            });
+
+            sel.onchange = (e) => setSubtitle(e.target.value);
+            setSubtitle("off");
+        }
+
+        let subtitleBlobUrl = null;
+
+        async function setSubtitle(trackId) {
+            const video = document.getElementById("videoPlayer");
+            if (!video) return;
+
+            video.querySelectorAll("track").forEach(t => t.remove());
+            if (subtitleBlobUrl) {
+                URL.revokeObjectURL(subtitleBlobUrl);
+                subtitleBlobUrl = null;
+            }
+
+            if (!trackId || trackId === "off") return;
+
+            const track = currentSubtitles.find(t => t.id === trackId);
+            if (!track) return;
+
+            if (!track.playable) {
+                showMessage(track.note || "This subtitle can't be shown in the browser.", "error");
+                return;
+            }
+
+            const url = `${API_URL}/dvd/subtitle/${currentTitleIdx}/${encodeURIComponent(track.id)}`;
+
+            try {
+                const response = await fetch(url);
+
+                if (!response.ok) {
+                    let detail = `HTTP ${response.status}`;
+                    try {
+                        const j = await response.json();
+                        if (j.error) detail = j.error;
+                    } catch (e) { }
+                    showMessage(`Subtitle failed: ${detail}`, "error");
+                    return;
+                }
+
+                const text = await response.text();
+
+                const firstLine = text.replace(/^\uFEFF/, "").split("\n", 1)[0].trim();
+                if (!firstLine.startsWith("WEBVTT")) {
+                    showMessage(`Server returned non-VTT data (starts with "${firstLine.slice(0, 20)}...")`, "error");
+                    return;
+                }
+
+                const clean = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+                const blob = new Blob([clean], { type: "text/vtt" });
+                subtitleBlobUrl = URL.createObjectURL(blob);
+
+                const trackEl = document.createElement("track");
+                trackEl.kind = "subtitles";
+                trackEl.label = track.title;
+                trackEl.srclang = track.language || "en";
+                trackEl.src = subtitleBlobUrl;
+                trackEl.default = true;
+
+                trackEl.addEventListener("load", () => {
+                    for (let i = 0; i < video.textTracks.length; i++) {
+                        video.textTracks[i].mode = "showing";
+                    }
+                });
+
+                trackEl.addEventListener("error", () => {
+                    showMessage(`Subtitle "${track.title}" failed to parse`, "error");
+                });
+
+                video.appendChild(trackEl);
+
+                setTimeout(() => {
+                    for (let i = 0; i < video.textTracks.length; i++) {
+                        video.textTracks[i].mode = "showing";
+                    }
+                }, 100);
+            } catch (err) {
+                console.error("Subtitle fetch failed:", err);
+                showMessage(`Subtitle fetch failed: ${err.message}`, "error");
+            }
+        }
+
+        // ---------- Chapter list ----------
+
+        function renderChapterButtons() {
+            const menuButtonsDiv = document.getElementById("menuButtons");
+            menuButtonsDiv.innerHTML = "";
+
+            if (!chapters || chapters.length === 0) {
+                menuButtonsDiv.innerHTML =
+                    "<div class='status'>No chapters found in this title.</div>";
+                return;
+            }
+
+            chapters.forEach((ch, idx) => {
+                const btn = document.createElement("button");
+                btn.className = "menu-button";
+                btn.dataset.idx = idx;
+
+                const titleSpan = document.createElement("span");
+                titleSpan.className = "chap-title";
+                titleSpan.textContent = ch.title || `Chapter ${ch.number}`;
+
+                const timeSpan = document.createElement("span");
+                timeSpan.className = "chap-time";
+                timeSpan.textContent = fmtTime(ch.start);
+
+                btn.appendChild(titleSpan);
+                btn.appendChild(timeSpan);
+                btn.onclick = () => jumpToChapter(idx);
+                menuButtonsDiv.appendChild(btn);
+            });
+        }
+
+        function jumpToChapter(idx) {
+            if (idx < 0 || idx >= chapters.length) return;
+            const video = document.getElementById("videoPlayer");
+            if (coverVisible) {
+                coverVisible = false;
+                const overlay = document.getElementById("coverOverlay");
+                if (overlay) overlay.classList.add("hidden");
+            }
+            video.currentTime = chapters[idx].start;
+            video.play();
+            highlightChapter(idx);
+        }
+
+        function highlightChapter(idx) {
+            activeChapterIdx = idx;
+            document.querySelectorAll(".menu-button").forEach((btn, i) => {
+                btn.classList.toggle("active", i === idx);
+            });
+            if (idx >= 0 && chapters[idx]) {
+                document.getElementById("playingStatus").textContent =
+                    `Chapter ${chapters[idx].number}: ${chapters[idx].title}`;
+            }
+        }
+
+        function onTimeUpdate(e) {
+            if (!chapters || chapters.length === 0) return;
+            const t = e.target.currentTime;
+            if (t > 0.5) lastGoodTime = t;
+            let idx = -1;
+            for (let i = 0; i < chapters.length; i++) {
+                if (t >= chapters[i].start && t < chapters[i].end) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx === -1 && t >= chapters[chapters.length - 1].start) {
+                idx = chapters.length - 1;
+            }
+            if (idx !== activeChapterIdx) highlightChapter(idx);
+        }
+
+        // ---------- Cache ----------
+
+        function unloadVideo() {
+            const video = document.getElementById("videoPlayer");
+            if (!video) return;
+            try { video.pause(); } catch (e) {}
+            video.removeAttribute("src");
+            video.querySelectorAll("track").forEach(t => t.remove());
+            try { video.load(); } catch (e) {}
+        }
+
+        async function loadCacheInfo() {
+            const list = document.getElementById("cacheList");
+            if (!list) return;
+            try {
+                const response = await fetch(`${API_URL}/dvd/cache/info`);
+                if (!response.ok) {
+                    console.warn("Cache info HTTP", response.status);
+                    list.innerHTML = `<div class='cache-empty'>Server returned ${response.status}</div>`;
+                    return;
+                }
+                const data = await response.json();
+                renderCacheList(data);
+            } catch (error) {
+                console.error("Cache info failed:", error);
+                list.innerHTML = "<div class='cache-empty'>Could not reach server</div>";
+            }
+        }
+
+        function renderCacheList(data) {
+            const list = document.getElementById("cacheList");
+            if (!list) return;
+
+            if (!data || !data.dvds || data.dvds.length === 0) {
+                list.innerHTML = "<div class='cache-empty'>No cached files</div>";
+                return;
+            }
+
+            list.innerHTML = "";
+
+            const total = document.createElement("div");
+            total.className = "cache-total";
+            total.textContent = `Total: ${fmtBytes(data.total_bytes)} · ${data.total_files} file${data.total_files === 1 ? "" : "s"}`;
+            list.appendChild(total);
+
+            data.dvds.forEach(dvd => {
+                const row = document.createElement("div");
+                row.className = "cache-row";
+
+                const name = document.createElement("span");
+                name.className = "cache-name";
+                const short = dvd.name.split("/").pop() || dvd.name;
+                name.textContent = short;
+                name.title = `${dvd.name}\n${dvd.files} file(s)\n${fmtBytes(dvd.bytes)} total`;
+
+                const size = document.createElement("span");
+                size.className = "cache-size";
+                size.textContent = fmtBytes(dvd.bytes);
+
+                const clearBtn = document.createElement("button");
+                clearBtn.className = "cache-clear";
+                clearBtn.textContent = "Clear";
+                clearBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    clearCacheForDVD(dvd.name);
+                };
+
+                row.appendChild(name);
+                row.appendChild(size);
+                row.appendChild(clearBtn);
+                list.appendChild(row);
+            });
+        }
+
+        async function clearCacheForDVD(dvdName, silent = false) {
+            if (!silent && !confirm(`Clear cached files for "${dvdName}"?\n\nYour MKV files are not affected.`)) {
+                return;
+            }
+
+            if (!silent) unloadVideo();
+            await new Promise(r => setTimeout(r, 100));
+
+            try {
+                const response = await fetch(
+                    `${API_URL}/dvd/cache/clear?dvd=${encodeURIComponent(dvdName)}`,
+                    { method: "POST" }
+                );
+                const data = await response.json();
+
+                if (response.status === 409) {
+                    showMessage(`${data.error}. Stop playback and try again.`, "error");
+                } else if (!response.ok) {
+                    showMessage(`Error: ${data.error || "Unknown error"}`, "error");
+                } else if (data.locked && data.locked.length > 0) {
+                    showMessage(
+                        `Cleared ${data.removed} file(s), ${data.locked.length} still locked`,
+                        "info"
+                    );
+                } else {
+                    showMessage(
+                        `Cleared ${data.removed} file(s) for "${dvdName}", freed ${data.mb_freed} MB`,
+                        "success"
+                    );
+                }
+
+                loadCacheInfo();
+            } catch (error) {
+                console.error("Clear failed:", error);
+                showMessage("Failed to clear cache", "error");
+            }
+        }
+
+        async function clearAllCache() {
+            if (!confirm("Clear cached files for ALL DVDs?\n\nYour MKV files are not affected.")) {
+                return;
+            }
+
+            unloadVideo();
+            await new Promise(r => setTimeout(r, 400));
+
+            const btn = document.getElementById("clearAllCacheBtn");
+            btn.disabled = true;
+            btn.textContent = "Clearing...";
+
+            try {
+                const response = await fetch(`${API_URL}/dvd/cache/clear`, { method: "POST" });
+                const data = await response.json();
+
+                if (response.status === 409) {
+                    showMessage(`${data.error}. Stop playback and try again.`, "error");
+                } else if (!response.ok) {
+                    showMessage(`Error: ${data.error || "Unknown error"}`, "error");
+                } else {
+                    showMessage(
+                        `Cleared ${data.removed} file(s) across all DVDs, freed ${data.mb_freed} MB`,
+                        "success"
+                    );
+                }
+
+                loadCacheInfo();
+            } catch (error) {
+                console.error("Clear all failed:", error);
+                showMessage("Failed to clear cache", "error");
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "Clear All";
+            }
+        }
+
+        // ---------- Messages / status ----------
+
+        function showMessage(text, type = "info") {
+            const messageArea = document.getElementById("messageArea");
+            messageArea.innerHTML = `<div class="${type}">${text}</div>`;
+            if (type !== "info") {
+                setTimeout(() => { messageArea.innerHTML = ""; }, 5000);
+            }
+        }
+
+        function updateConnectionStatus(status) {
+            document.getElementById("connectionStatus").textContent = `Server: ${status}`;
+        }
+
+        // ---------- Custom Video Controls ----------
+
+        function setupCustomControls() {
+            const video = document.getElementById("videoPlayer");
+            const player = document.getElementById("videoPlayerContainer");
+            const playPauseBtn = document.getElementById("playPauseBtn");
+            const progressBar = document.getElementById("progressBar");
+            const playedBar = document.getElementById("playedBar");
+            const bufferedBar = document.getElementById("bufferedBar");
+            const progressKnob = document.getElementById("progressKnob");
+            const timeDisplay = document.getElementById("timeDisplay");
+            const muteBtn = document.getElementById("muteBtn");
+            const volumeSlider = document.getElementById("volumeSlider");
+            const fullscreenBtn = document.getElementById("fullscreenBtn");
+            if (!video || !player) return;
+
+            const ICON_PLAY = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
+            const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z" fill="currentColor"/></svg>';
+            const ICON_VOL_HIGH = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" fill="currentColor"/></svg>';
+            const ICON_VOL_LOW = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z" fill="currentColor"/></svg>';
+            const ICON_VOL_MUTE = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" fill="currentColor"/></svg>';
+            const ICON_FS = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/></svg>';
+            const ICON_FS_EXIT = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" fill="currentColor"/></svg>';
+
+            function togglePlay() {
+                if (coverVisible) {
+                    startPlayback();
+                    return;
+                }
+                if (video.paused || video.ended) video.play().catch(() => {});
+                else video.pause();
+            }
+
+            playPauseBtn.onclick = (e) => { e.stopPropagation(); togglePlay(); };
+
+            video.addEventListener("play", () => {
+                playPauseBtn.innerHTML = ICON_PAUSE;
+                scheduleHide();
+            });
+            video.addEventListener("pause", () => {
+                playPauseBtn.innerHTML = ICON_PLAY;
+                showControls();
+            });
+            video.addEventListener("ended", () => {
+                playPauseBtn.innerHTML = ICON_PLAY;
+                showControls();
+            });
+
+            video.addEventListener("click", (e) => {
+                if (e.target.closest(".player-controls")) return;
+                if (coverVisible) return;
+                togglePlay();
+            });
+
+            function fmtPlayerTime(sec) {
+                if (!isFinite(sec) || sec < 0) return "0:00";
+                sec = Math.floor(sec);
+                const h = Math.floor(sec / 3600);
+                const m = Math.floor((sec % 3600) / 60);
+                const s = sec % 60;
+                if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+                return `${m}:${String(s).padStart(2, "0")}`;
+            }
+
+            function updateProgress() {
+                const dur = video.duration;
+                if (!dur || !isFinite(dur)) {
+                    timeDisplay.textContent = `${fmtPlayerTime(video.currentTime)} / 0:00`;
+                    return;
+                }
+                const pct = Math.max(0, Math.min(100, (video.currentTime / dur) * 100));
+                playedBar.style.width = pct + "%";
+                progressKnob.style.left = pct + "%";
+                timeDisplay.textContent = `${fmtPlayerTime(video.currentTime)} / ${fmtPlayerTime(dur)}`;
+            }
+
+            video.addEventListener("timeupdate", updateProgress);
+            video.addEventListener("loadedmetadata", updateProgress);
+            video.addEventListener("durationchange", updateProgress);
+            video.addEventListener("seeked", updateProgress);
+
+            video.addEventListener("progress", () => {
+                const dur = video.duration;
+                if (!dur || !video.buffered.length) return;
+                let end = 0;
+                for (let i = 0; i < video.buffered.length; i++) {
+                    if (video.buffered.start(i) <= video.currentTime &&
+                        video.currentTime <= video.buffered.end(i)) {
+                        end = video.buffered.end(i);
+                        break;
+                    }
+                }
+                bufferedBar.style.width = ((end / dur) * 100) + "%";
+            });
+
+            let seeking = false;
+            function seekFromEvent(e) {
+                const rect = progressBar.getBoundingClientRect();
+                let pct = (e.clientX - rect.left) / rect.width;
+                pct = Math.max(0, Math.min(1, pct));
+                if (video.duration && isFinite(video.duration)) {
+                    video.currentTime = pct * video.duration;
+                    updateProgress();
+                }
+            }
+
+            progressBar.addEventListener("pointerdown", (e) => {
+                if (coverVisible) return;
+                seeking = true;
+                progressBar.setPointerCapture(e.pointerId);
+                seekFromEvent(e);
+                e.preventDefault();
+            });
+            progressBar.addEventListener("pointermove", (e) => {
+                if (seeking) seekFromEvent(e);
+            });
+            progressBar.addEventListener("pointerup", (e) => {
+                seeking = false;
+                try { progressBar.releasePointerCapture(e.pointerId); } catch (err) {}
+            });
+            progressBar.addEventListener("pointercancel", () => { seeking = false; });
+
+            function updateMuteIcon() {
+                if (video.muted || video.volume === 0) muteBtn.innerHTML = ICON_VOL_MUTE;
+                else if (video.volume < 0.5) muteBtn.innerHTML = ICON_VOL_LOW;
+                else muteBtn.innerHTML = ICON_VOL_HIGH;
+            }
+
+            muteBtn.onclick = (e) => {
+                e.stopPropagation();
+                video.muted = !video.muted;
+                updateMuteIcon();
+            };
+
+            volumeSlider.oninput = () => {
+                video.volume = parseFloat(volumeSlider.value);
+                video.muted = video.volume === 0;
+                updateMuteIcon();
+            };
+            video.addEventListener("volumechange", () => {
+                volumeSlider.value = String(video.muted ? 0 : video.volume);
+                updateMuteIcon();
+            });
+
+            fullscreenBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                } else if (player.requestFullscreen) {
+                    player.requestFullscreen();
+                } else if (video.webkitRequestFullscreen) {
+                    video.webkitRequestFullscreen();
+                }
+            };
+
+            document.addEventListener("fullscreenchange", () => {
+                fullscreenBtn.innerHTML = document.fullscreenElement ? ICON_FS_EXIT : ICON_FS;
+            });
+
+            let hideTimer = null;
+            function showControls() {
+                player.classList.remove("controls-hidden");
+                if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+            }
+            function scheduleHide() {
+                if (hideTimer) clearTimeout(hideTimer);
+                if (video.paused || video.ended) return;
+                hideTimer = setTimeout(() => {
+                    player.classList.add("controls-hidden");
+                }, 3000);
+            }
+
+            player.addEventListener("mousemove", () => { showControls(); scheduleHide(); });
+            player.addEventListener("mouseleave", () => {
+                if (!video.paused) player.classList.add("controls-hidden");
+            });
+            player.addEventListener("mouseenter", showControls);
+
+            document.addEventListener("keydown", (e) => {
+                const tag = (document.activeElement && document.activeElement.tagName) || "";
+                if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+
+                if (!document.getElementById("videoPlayer")) return;
+
+                switch (e.key) {
+                    case " ":
+                    case "k":
+                        togglePlay();
+                        e.preventDefault();
+                        break;
+                    case "ArrowLeft":
+                        if (coverVisible) return;
+                        video.currentTime = Math.max(0, video.currentTime - 10);
+                        e.preventDefault();
+                        break;
+                    case "ArrowRight":
+                        if (coverVisible) return;
+                        video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
+                        e.preventDefault();
+                        break;
+                    case "ArrowUp":
+                        video.volume = Math.min(1, video.volume + 0.1);
+                        video.muted = false;
+                        e.preventDefault();
+                        break;
+                    case "ArrowDown":
+                        video.volume = Math.max(0, video.volume - 0.1);
+                        e.preventDefault();
+                        break;
+                    case "m":
+                        video.muted = !video.muted;
+                        e.preventDefault();
+                        break;
+                    case "f":
+                        if (document.fullscreenElement) document.exitFullscreen();
+                        else player.requestFullscreen && player.requestFullscreen();
+                        e.preventDefault();
+                        break;
+                }
+            });
+
+            updateMuteIcon();
+            updateProgress();
+        }
+
+        // ---------- Init ----------
+
+        window.addEventListener("load", () => {
+            // Sanity check: every function the app depends on must exist.
+            const required = [
+                "loadDVDList","toggleGenre","loadDVD","computeTitleOrder",
+                "renderPlayer","setupCoverOverlay","selectTitle",
+                "populateTitleSelect","populateAudioSelect","populateSubtitleSelect",
+                "setupCustomControls"
+            ];
+            const missing = required.filter(n => typeof window[n] !== "function");
+            if (missing.length) {
+                console.error("MISSING FUNCTIONS:", missing);
+                document.getElementById("connectionStatus").textContent =
+                    "Broken build — check console";
+                return;
+            }
+
+            let themes = discoverThemes();
+            console.log(`Discovered ${themes.length} themes:`,
+                        themes.map(t => `${t.id} (${t.label})`));
+
+            if (themes.length === 0) {
+                console.warn("Theme discovery returned nothing; using fallback list");
+                themes = [
+                    { id: "terminal", label: "Terminal" },
+                    { id: "midnight", label: "Midnight" },
+                    { id: "light",    label: "Light" },
+                ];
+            }
+
+            const themeEl = document.getElementById("themeSelect");
+            themeEl.innerHTML = "";
+            themes.forEach(t => {
+                const opt = document.createElement("option");
+                opt.value = t.id;
+                opt.textContent = t.label;
+                themeEl.appendChild(opt);
+            });
+
+            const available = themes.map(t => t.id);
+            if (!available.includes(themeName)) {
+                themeName = available[0];
+                try { localStorage.setItem("theme", themeName); } catch (e) {}
+            }
+
+            themeEl.value = themeName;
+            applyTheme(themeName);
+            applyDim(dimmed);
+
+            themeEl.onchange = (e) => {
+                themeName = e.target.value;
+                try { localStorage.setItem("theme", themeName); } catch (e) {}
+                applyTheme(themeName);
+            };
+
+            const dimEl = document.getElementById("dimToggle");
+            dimEl.checked = dimmed;
+            dimEl.onchange = (e) => {
+                dimmed = e.target.checked;
+                try { localStorage.setItem("dimmed", dimmed ? "1" : "0"); } catch (e) {}
+                applyDim(dimmed);
+            };
+
+            document.querySelectorAll('input[name="cacheMode"]').forEach(radio => {
+                radio.checked = (radio.value === cacheMode);
+                radio.onchange = (e) => {
+                    cacheMode = e.target.value;
+                    try { localStorage.setItem("cacheMode", cacheMode); } catch (err) {}
+                    console.log(`[Cache] Auto-clear mode set to: ${cacheMode}`);
+                };
+            });
+
+            loadDVDList();
+            setInterval(loadDVDList, 15000);
+
+            loadCacheInfo();
+            setInterval(loadCacheInfo, 3000);
+
+            document.getElementById("clearAllCacheBtn").onclick = clearAllCache;
+        });
+    </script>
+</body>
+</html>

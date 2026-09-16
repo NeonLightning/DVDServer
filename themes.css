@@ -1,0 +1,636 @@
+/* ============================================================
+   themes.css — Theme palette definitions
+   ============================================================
+   Each theme is a block of CSS variables. To add a new theme:
+     1. Copy one of the blocks below and rename `body.theme-xyz`.
+     2. Change the values (including `--theme-name`).
+     3. Reload the page — the theme appears in the dropdown automatically.
+   ============================================================ */
+
+/* ---------- Midnight ---------- */
+body.theme-midnight {
+    --theme-name: "Midnight";
+    --bg: #000000;
+    --panel: #0d0d0d;
+    --card: #161616;
+    --card-hover: #202020;
+    --card-active: #2a2a2a;
+    --border: #1f1f1f;
+    --border-soft: #262626;
+    --text: #d8d8d8;
+    --text-bright: #ffffff;
+    --text-dim: #888;
+    --text-faint: #444;
+    --text-mono: #6e6e6e;
+    --accent: #a78bfa;
+    --accent-dim: #4a3a7a;
+    --accent-soft: #d8ccff;
+    --accent-bg: #2a1a4a;
+    --accent-text: #d0b8ff;
+    --danger: #ff5555;
+    --danger-bg: #3a1a1a;
+    --danger-text: #ffb0b0;
+    --danger-border: #4a2a2a;
+    --danger-border-hover: #ff5555;
+    --danger-hover-bg: #4a1a1a;
+    --danger-hover-text: #ffcccc;
+    --success: #4ade80;
+    --success-bg: #1a3a1f;
+    --success-text: #b0ffc0;
+    --toggle-off: #262626;
+    --toggle-knob: #666;
+    --video-bg: #000;
+    --sidebar-shadow: none;
+
+    --player-bar-bg: rgba(0, 0, 0, 0.78);
+    --player-text: #f0f0f0;
+    --player-text-dim: rgba(240, 240, 240, 0.65);
+    --player-btn-hover: rgba(167, 139, 250, 0.22);
+    --player-progress-bg: rgba(255, 255, 255, 0.18);
+    --player-progress-buffered: rgba(255, 255, 255, 0.34);
+    --player-progress-played: var(--accent);
+    --player-knob-bg: #a78bfa;
+    --player-knob-shadow: 0 0 8px rgba(167, 139, 250, 0.7);
+    --player-focus-ring: #a78bfa;
+}
+
+/* ---------- Light ---------- */
+body.theme-light {
+    --theme-name: "Light";
+    --bg: #f0f2f8;
+    --panel: #ffffff;
+    --card: #e8ebf3;
+    --card-hover: #dde2ee;
+    --card-active: #cfd6e8;
+    --border: #c8cdd8;
+    --border-soft: #d4d8e0;
+    --text: #1a1f2e;
+    --text-bright: #000000;
+    --text-dim: #5a6070;
+    --text-faint: #a8aec0;
+    --text-mono: #7a8298;
+    --accent: #2563eb;
+    --accent-dim: #93b4f0;
+    --accent-soft: #1e3a70;
+    --accent-bg: #dbeafe;
+    --accent-text: #1e40af;
+    --danger: #dc2626;
+    --danger-bg: #fee2e2;
+    --danger-text: #991b1b;
+    --danger-border: #fecaca;
+    --danger-border-hover: #dc2626;
+    --danger-hover-bg: #fecaca;
+    --danger-hover-text: #7f1d1d;
+    --success: #16a34a;
+    --success-bg: #dcfce7;
+    --success-text: #14532d;
+    --toggle-off: #d4d8e0;
+    --toggle-knob: #a0a8b8;
+    --video-bg: #000;
+    --sidebar-shadow: 0 0 20px rgba(0, 0, 0, 0.06);
+
+    --player-bar-bg: rgba(15, 20, 35, 0.82);
+    --player-text: #ffffff;
+    --player-text-dim: rgba(255, 255, 255, 0.7);
+    --player-btn-hover: rgba(37, 99, 235, 0.35);
+    --player-progress-bg: rgba(255, 255, 255, 0.22);
+    --player-progress-buffered: rgba(255, 255, 255, 0.4);
+    --player-progress-played: #3b82f6;
+    --player-knob-bg: #3b82f6;
+    --player-knob-shadow: 0 0 8px rgba(59, 130, 246, 0.75);
+    --player-focus-ring: #60a5fa;
+}
+
+/* ---------- Terminal (default fallback) ---------- */
+:root, body.theme-terminal {
+    --theme-name: "Terminal";
+    --bg: #000000;
+    --panel: #050a05;
+    --card: #0a150a;
+    --card-hover: #0f200f;
+    --card-active: #143014;
+    --border: #0d200d;
+    --border-soft: #1a3a1a;
+    --text: #00ff41;
+    --text-bright: #00ff88;
+    --text-dim: #00aa33;
+    --text-faint: #004422;
+    --text-mono: #00cc44;
+    --accent: #00ff41;
+    --accent-dim: #006622;
+    --accent-soft: #88ffaa;
+    --accent-bg: #0a2010;
+    --accent-text: #00ff66;
+    --danger: #ff3355;
+    --danger-bg: #200505;
+    --danger-text: #ff8888;
+    --danger-border: #401010;
+    --danger-border-hover: #ff3355;
+    --danger-hover-bg: #3a0a0a;
+    --danger-hover-text: #ffaaaa;
+    --success: #00ff41;
+    --success-bg: #0a2010;
+    --success-text: #88ffaa;
+    --toggle-off: #0d200d;
+    --toggle-knob: #005522;
+    --video-bg: #000;
+    --sidebar-shadow: none;
+
+    --player-bar-bg: rgba(0, 15, 0, 0.82);
+    --player-text: #00ff41;
+    --player-text-dim: rgba(0, 255, 65, 0.6);
+    --player-btn-hover: rgba(0, 255, 65, 0.18);
+    --player-progress-bg: rgba(0, 255, 65, 0.15);
+    --player-progress-buffered: rgba(0, 255, 65, 0.3);
+    --player-progress-played: #00ff41;
+    --player-knob-bg: #00ff41;
+    --player-knob-shadow: 0 0 10px rgba(0, 255, 65, 0.85);
+    --player-focus-ring: #00ff88;
+}
+
+/* ---------- Solarized ---------- */
+body.theme-solarized {
+    --theme-name: "Solarized";
+    --bg: #002b36;
+    --panel: #073642;
+    --card: #0a4250;
+    --card-hover: #0e4b5a;
+    --card-active: #135b6a;
+    --border: #0f4a5a;
+    --border-soft: #1a5a6a;
+    --text: #93a1a1;
+    --text-bright: #eee8d5;
+    --text-dim: #657b83;
+    --text-faint: #586e75;
+    --text-mono: #839496;
+    --accent: #b58900;
+    --accent-dim: #6a5000;
+    --accent-soft: #f0d888;
+    --accent-bg: #2a2010;
+    --accent-text: #f0d888;
+    --danger: #dc322f;
+    --danger-bg: #2a1410;
+    --danger-text: #ff8888;
+    --danger-border: #4a1a1a;
+    --danger-border-hover: #dc322f;
+    --danger-hover-bg: #3a1818;
+    --danger-hover-text: #ffcccc;
+    --success: #859900;
+    --success-bg: #1a2010;
+    --success-text: #c0d860;
+    --toggle-off: #0f4a5a;
+    --toggle-knob: #657b83;
+    --video-bg: #000;
+    --sidebar-shadow: none;
+
+    --player-bar-bg: rgba(0, 20, 28, 0.85);
+    --player-text: #eee8d5;
+    --player-text-dim: rgba(238, 232, 213, 0.6);
+    --player-btn-hover: rgba(181, 137, 0, 0.25);
+    --player-progress-bg: rgba(238, 232, 213, 0.15);
+    --player-progress-buffered: rgba(238, 232, 213, 0.3);
+    --player-progress-played: #b58900;
+    --player-knob-bg: #b58900;
+    --player-knob-shadow: 0 0 8px rgba(181, 137, 0, 0.7);
+    --player-focus-ring: #b58900;
+}
+
+/* ---------- Dracula ---------- */
+body.theme-dracula {
+    --theme-name: "Dracula";
+    --bg: #282a36;
+    --panel: #21222c;
+    --card: #343746;
+    --card-hover: #3e4154;
+    --card-active: #4a4d64;
+    --border: #2b2d3a;
+    --border-soft: #44475a;
+    --text: #f8f8f2;
+    --text-bright: #ffffff;
+    --text-dim: #bcc2cd;
+    --text-faint: #6272a4;
+    --text-mono: #9aa5ce;
+    --accent: #bd93f9;
+    --accent-dim: #5f4a8a;
+    --accent-soft: #d8c4ff;
+    --accent-bg: #2d2142;
+    --accent-text: #d8c4ff;
+    --danger: #ff5555;
+    --danger-bg: #3a1a1a;
+    --danger-text: #ffb0b0;
+    --danger-border: #5a2a2a;
+    --danger-border-hover: #ff5555;
+    --danger-hover-bg: #4a1f1f;
+    --danger-hover-text: #ffcccc;
+    --success: #50fa7b;
+    --success-bg: #1a3a24;
+    --success-text: #b0ffc4;
+    --toggle-off: #44475a;
+    --toggle-knob: #6272a4;
+    --video-bg: #000;
+    --sidebar-shadow: none;
+
+    --player-bar-bg: rgba(20, 21, 30, 0.85);
+    --player-text: #f8f8f2;
+    --player-text-dim: rgba(248, 248, 242, 0.6);
+    --player-btn-hover: rgba(189, 147, 249, 0.25);
+    --player-progress-bg: rgba(248, 248, 242, 0.16);
+    --player-progress-buffered: rgba(248, 248, 242, 0.32);
+    --player-progress-played: #bd93f9;
+    --player-knob-bg: #ff79c6;
+    --player-knob-shadow: 0 0 10px rgba(255, 121, 198, 0.75);
+    --player-focus-ring: #ff79c6;
+}
+
+/* ---------- Nord ---------- */
+body.theme-nord {
+    --theme-name: "Nord";
+    --bg: #2e3440;
+    --panel: #2b303b;
+    --card: #3b4252;
+    --card-hover: #434c5e;
+    --card-active: #4c566a;
+    --border: #373e4d;
+    --border-soft: #4c566a;
+    --text: #d8dee9;
+    --text-bright: #eceff4;
+    --text-dim: #8f9db0;
+    --text-faint: #5e6773;
+    --text-mono: #a3adbf;
+    --accent: #88c0d0;
+    --accent-dim: #48687a;
+    --accent-soft: #c8e2ea;
+    --accent-bg: #2b3d46;
+    --accent-text: #bde0e8;
+    --danger: #bf616a;
+    --danger-bg: #3a2226;
+    --danger-text: #e5a3a8;
+    --danger-border: #5a3238;
+    --danger-border-hover: #bf616a;
+    --danger-hover-bg: #4a2a2f;
+    --danger-hover-text: #f0bec2;
+    --success: #a3be8c;
+    --success-bg: #2b3a2a;
+    --success-text: #c5dcb1;
+    --toggle-off: #434c5e;
+    --toggle-knob: #7a8699;
+    --video-bg: #000;
+    --sidebar-shadow: none;
+
+    --player-bar-bg: rgba(30, 34, 42, 0.85);
+    --player-text: #eceff4;
+    --player-text-dim: rgba(236, 239, 244, 0.6);
+    --player-btn-hover: rgba(136, 192, 208, 0.22);
+    --player-progress-bg: rgba(216, 222, 233, 0.16);
+    --player-progress-buffered: rgba(216, 222, 233, 0.32);
+    --player-progress-played: #88c0d0;
+    --player-knob-bg: #88c0d0;
+    --player-knob-shadow: 0 0 8px rgba(136, 192, 208, 0.75);
+    --player-focus-ring: #8fbcbb;
+}
+
+/* ---------- Gruvbox ---------- */
+body.theme-gruvbox {
+    --theme-name: "Gruvbox";
+    --bg: #282828;
+    --panel: #1d2021;
+    --card: #3c3836;
+    --card-hover: #504945;
+    --card-active: #665c54;
+    --border: #32302f;
+    --border-soft: #504945;
+    --text: #ebdbb2;
+    --text-bright: #fbf1c7;
+    --text-dim: #a89984;
+    --text-faint: #7c6f64;
+    --text-mono: #bdae93;
+    --accent: #d79921;
+    --accent-dim: #7c5c14;
+    --accent-soft: #f0d888;
+    --accent-bg: #3a2e18;
+    --accent-text: #f5d78c;
+    --danger: #fb4934;
+    --danger-bg: #3a1f1c;
+    --danger-text: #ffab9e;
+    --danger-border: #5a2a24;
+    --danger-border-hover: #fb4934;
+    --danger-hover-bg: #4a241f;
+    --danger-hover-text: #ffccc2;
+    --success: #b8bb26;
+    --success-bg: #2b2e1a;
+    --success-text: #dde08a;
+    --toggle-off: #504945;
+    --toggle-knob: #7c6f64;
+    --video-bg: #000;
+    --sidebar-shadow: none;
+
+    --player-bar-bg: rgba(20, 20, 20, 0.85);
+    --player-text: #fbf1c7;
+    --player-text-dim: rgba(235, 219, 178, 0.6);
+    --player-btn-hover: rgba(215, 153, 33, 0.25);
+    --player-progress-bg: rgba(235, 219, 178, 0.16);
+    --player-progress-buffered: rgba(235, 219, 178, 0.32);
+    --player-progress-played: #d79921;
+    --player-knob-bg: #fabd2f;
+    --player-knob-shadow: 0 0 8px rgba(250, 189, 47, 0.75);
+    --player-focus-ring: #fabd2f;
+}
+
+/* ---------- Tokyo Night ---------- */
+body.theme-tokyo {
+    --theme-name: "Tokyo Night";
+    --bg: #1a1b26;
+    --panel: #16161e;
+    --card: #24283b;
+    --card-hover: #2f3549;
+    --card-active: #3b4258;
+    --border: #1f2335;
+    --border-soft: #2f3549;
+    --text: #c0caf5;
+    --text-bright: #ffffff;
+    --text-dim: #7f8bb0;
+    --text-faint: #565f89;
+    --text-mono: #9aa5ce;
+    --accent: #7aa2f7;
+    --accent-dim: #3d5b91;
+    --accent-soft: #bbd0ff;
+    --accent-bg: #1e2b48;
+    --accent-text: #a8c0ff;
+    --danger: #f7768e;
+    --danger-bg: #331e28;
+    --danger-text: #ffb0bd;
+    --danger-border: #5a2f3d;
+    --danger-border-hover: #f7768e;
+    --danger-hover-bg: #4a2832;
+    --danger-hover-text: #ffccd4;
+    --success: #9ece6a;
+    --success-bg: #24301f;
+    --success-text: #c8e8a4;
+    --toggle-off: #2f3549;
+    --toggle-knob: #565f89;
+    --video-bg: #000;
+    --sidebar-shadow: none;
+
+    --player-bar-bg: rgba(10, 11, 18, 0.85);
+    --player-text: #c0caf5;
+    --player-text-dim: rgba(192, 202, 245, 0.6);
+    --player-btn-hover: rgba(122, 162, 247, 0.25);
+    --player-progress-bg: rgba(192, 202, 245, 0.16);
+    --player-progress-buffered: rgba(192, 202, 245, 0.32);
+    --player-progress-played: #7aa2f7;
+    --player-knob-bg: #bb9af7;
+    --player-knob-shadow: 0 0 10px rgba(187, 154, 247, 0.8);
+    --player-focus-ring: #bb9af7;
+}
+
+/* ---------- Catppuccin ---------- */
+body.theme-catppuccin {
+    --theme-name: "Catppuccin";
+    --bg: #1e1e2e;
+    --panel: #181825;
+    --card: #313244;
+    --card-hover: #45475a;
+    --card-active: #585b70;
+    --border: #27273a;
+    --border-soft: #45475a;
+    --text: #cdd6f4;
+    --text-bright: #ffffff;
+    --text-dim: #a6adc8;
+    --text-faint: #6c7086;
+    --text-mono: #bac2de;
+    --accent: #cba6f7;
+    --accent-dim: #6a5296;
+    --accent-soft: #e0c8ff;
+    --accent-bg: #352a4a;
+    --accent-text: #e0c8ff;
+    --danger: #f38ba8;
+    --danger-bg: #3a1f2a;
+    --danger-text: #ffb8c8;
+    --danger-border: #5a2f3d;
+    --danger-border-hover: #f38ba8;
+    --danger-hover-bg: #4a2832;
+    --danger-hover-text: #ffd0dc;
+    --success: #a6e3a1;
+    --success-bg: #24381f;
+    --success-text: #c8f0c0;
+    --toggle-off: #45475a;
+    --toggle-knob: #6c7086;
+    --video-bg: #000;
+    --sidebar-shadow: none;
+
+    --player-bar-bg: rgba(17, 17, 27, 0.85);
+    --player-text: #cdd6f4;
+    --player-text-dim: rgba(205, 214, 244, 0.6);
+    --player-btn-hover: rgba(203, 166, 247, 0.22);
+    --player-progress-bg: rgba(205, 214, 244, 0.16);
+    --player-progress-buffered: rgba(205, 214, 244, 0.32);
+    --player-progress-played: #cba6f7;
+    --player-knob-bg: #f5c2e7;
+    --player-knob-shadow: 0 0 10px rgba(245, 194, 231, 0.8);
+    --player-focus-ring: #f5c2e7;
+}
+
+/* ---------- Rosé Pine ---------- */
+body.theme-rosepine {
+    --theme-name: "Rosé Pine";
+    --bg: #191724;
+    --panel: #1f1d2e;
+    --card: #26233a;
+    --card-hover: #33304b;
+    --card-active: #403c5a;
+    --border: #232136;
+    --border-soft: #33304b;
+    --text: #e0def4;
+    --text-bright: #ffffff;
+    --text-dim: #908caa;
+    --text-faint: #6e6a86;
+    --text-mono: #b3b0c9;
+    --accent: #c4a7e7;
+    --accent-dim: #635184;
+    --accent-soft: #e0ccf2;
+    --accent-bg: #322a45;
+    --accent-text: #e0ccf2;
+    --danger: #eb6f92;
+    --danger-bg: #3a1f28;
+    --danger-text: #ffb0c0;
+    --danger-border: #5a2f3d;
+    --danger-border-hover: #eb6f92;
+    --danger-hover-bg: #4a2832;
+    --danger-hover-text: #ffd0dc;
+    --success: #9ccfd8;
+    --success-bg: #1f3238;
+    --success-text: #c8e2e8;
+    --toggle-off: #33304b;
+    --toggle-knob: #6e6a86;
+    --video-bg: #000;
+    --sidebar-shadow: none;
+
+    --player-bar-bg: rgba(12, 10, 20, 0.85);
+    --player-text: #e0def4;
+    --player-text-dim: rgba(224, 222, 244, 0.6);
+    --player-btn-hover: rgba(196, 167, 231, 0.22);
+    --player-progress-bg: rgba(224, 222, 244, 0.16);
+    --player-progress-buffered: rgba(224, 222, 244, 0.32);
+    --player-progress-played: #c4a7e7;
+    --player-knob-bg: #ebbcba;
+    --player-knob-shadow: 0 0 10px rgba(235, 188, 186, 0.8);
+    --player-focus-ring: #ebbcba;
+}
+
+/* ---------- Forest ---------- */
+body.theme-forest {
+    --theme-name: "Forest";
+    --bg: #0a1410;
+    --panel: #0f1d16;
+    --card: #14271e;
+    --card-hover: #1a3427;
+    --card-active: #204130;
+    --border: #122018;
+    --border-soft: #1c3024;
+    --text: #d4e0d8;
+    --text-bright: #f0f8f2;
+    --text-dim: #8ea895;
+    --text-faint: #567a5f;
+    --text-mono: #a3bea8;
+    --accent: #86efac;
+    --accent-dim: #4a8659;
+    --accent-soft: #c0f0cc;
+    --accent-bg: #1a3524;
+    --accent-text: #b0e8c0;
+    --danger: #f87171;
+    --danger-bg: #2e1515;
+    --danger-text: #ffb0b0;
+    --danger-border: #4a2020;
+    --danger-border-hover: #f87171;
+    --danger-hover-bg: #3a1a1a;
+    --danger-hover-text: #ffcccc;
+    --success: #86efac;
+    --success-bg: #1a3524;
+    --success-text: #b0e8c0;
+    --toggle-off: #1c3024;
+    --toggle-knob: #4a6652;
+    --video-bg: #000;
+    --sidebar-shadow: none;
+
+    --player-bar-bg: rgba(5, 12, 8, 0.85);
+    --player-text: #d4e0d8;
+    --player-text-dim: rgba(212, 224, 216, 0.6);
+    --player-btn-hover: rgba(134, 239, 172, 0.2);
+    --player-progress-bg: rgba(212, 224, 216, 0.16);
+    --player-progress-buffered: rgba(212, 224, 216, 0.32);
+    --player-progress-played: #86efac;
+    --player-knob-bg: #86efac;
+    --player-knob-shadow: 0 0 10px rgba(134, 239, 172, 0.75);
+    --player-focus-ring: #a7f3d0;
+}
+
+/* ---------- Cyberpunk ---------- */
+body.theme-cyberpunk {
+    --theme-name: "Cyberpunk";
+    --bg: #0d0221;
+    --panel: #10042a;
+    --card: #1a0838;
+    --card-hover: #240c4a;
+    --card-active: #2e105c;
+    --border: #1f0a45;
+    --border-soft: #331a5c;
+    --text: #e0d4ff;
+    --text-bright: #ffffff;
+    --text-dim: #a78bfa;
+    --text-faint: #5a3d8a;
+    --text-mono: #c4b5fd;
+    --accent: #00f5ff;
+    --accent-dim: #0a5a6a;
+    --accent-soft: #b0f8ff;
+    --accent-bg: #0a2030;
+    --accent-text: #88f0ff;
+    --danger: #ff2e97;
+    --danger-bg: #3a0a25;
+    --danger-text: #ff9ed0;
+    --danger-border: #5a1a3d;
+    --danger-border-hover: #ff2e97;
+    --danger-hover-bg: #4a0f30;
+    --danger-hover-text: #ffcce0;
+    --success: #00ff9f;
+    --success-bg: #0a3020;
+    --success-text: #88ffcc;
+    --toggle-off: #1f0a45;
+    --toggle-knob: #5a3d8a;
+    --video-bg: #000;
+    --sidebar-shadow: 0 0 24px rgba(0, 245, 255, 0.05);
+
+    --player-bar-bg: rgba(5, 0, 18, 0.88);
+    --player-text: #e0d4ff;
+    --player-text-dim: rgba(224, 212, 255, 0.6);
+    --player-btn-hover: rgba(0, 245, 255, 0.25);
+    --player-progress-bg: rgba(224, 212, 255, 0.16);
+    --player-progress-buffered: rgba(224, 212, 255, 0.32);
+    --player-progress-played: #00f5ff;
+    --player-knob-bg: #ff2e97;
+    --player-knob-shadow: 0 0 12px rgba(255, 46, 151, 0.9);
+    --player-focus-ring: #ff2e97;
+}
+
+/* ---------- Hot Dog Stand ----------
+   Windows 3.1's infamous color scheme: yellow background, black
+   outlines and text, red accents. All text on red surfaces is
+   black so it stays readable.
+   -------------------------------------------------------------- */
+body.theme-hotdogstand {
+    --theme-name: "Hot Dog Stand";
+    --bg: #ffff00;
+    --panel: #ffff00;
+    --card: #ff0000;
+    --card-hover: #ffcc00;
+    --card-active: #ff0000;
+    --border: #000000;
+    --border-soft: #000000;
+    --text: #000000;
+    --text-bright: #000000;
+    --text-dim: #000000;
+    --text-faint: #000000;
+    --text-mono: #000000;
+    --accent: #ff0000;
+    --accent-dim: #990000;
+    --accent-soft: #000000;
+    --accent-bg: #ff0000;
+    --accent-text: #000000;
+    --danger: #ff0000;
+    --danger-bg: #ff0000;
+    --danger-text: #000000;
+    --danger-border: #000000;
+    --danger-border-hover: #990000;
+    --danger-hover-bg: #990000;
+    --danger-hover-text: #ffff00;
+    --success: #008000;
+    --success-bg: #008000;
+    --success-text: #ffff00;
+    --toggle-off: #ffff00;
+    --toggle-knob: #000000;
+    --video-bg: #000;
+    --sidebar-shadow: 4px 4px 0 #000000;
+
+    --player-bar-bg: rgba(0, 0, 0, 0.88);
+    --player-text: #ffff00;
+    --player-text-dim: rgba(255, 255, 0, 0.7);
+    --player-btn-hover: rgba(255, 0, 0, 0.35);
+    --player-progress-bg: rgba(255, 255, 0, 0.25);
+    --player-progress-buffered: rgba(255, 255, 0, 0.45);
+    --player-progress-played: #ff0000;
+    --player-knob-bg: #ff0000;
+    --player-knob-shadow: 0 0 10px rgba(255, 0, 0, 0.95);
+    --player-focus-ring: #ffff00;
+}
+/* ============================================================
+   Shared player defaults
+   ============================================================ */
+
+:root {
+    --player-radius: 3px;
+    --player-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --player-progress-height: 5px;
+    --player-progress-height-hover: 8px;
+    --player-knob-size: 14px;
+    --player-icon-size: 22px;
+    --player-icon-size-sm: 20px;
+}

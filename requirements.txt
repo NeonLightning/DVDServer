@@ -1,0 +1,15 @@
+# DVD Server — Python dependencies
+#
+# Install into the venv:
+#   Linux:   venv/bin/pip install -r requirements.txt
+#   Windows: venv\Scripts\pip install -r requirements.txt
+#
+# Only pure-Python or widely-available wheels, so this installs cleanly on
+# x86_64 and ARM64 (Odroid/Raspberry Pi) without needing a compiler.
+
+Flask>=3.0,<4
+flask-cors>=4.0,<5
+waitress>=3.0,<4
+zeroconf>=0.130,<1
+
+# NOTE: ffmpeg and ffprobe are NOT pip packages. See EXTERNAL_PROGRAMS.md.
