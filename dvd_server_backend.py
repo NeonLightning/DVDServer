@@ -1,5 +1,5 @@
 """
-DVD Server - Backend (Hardened MKV version)
+DVD Server - Backend (Hardened MKV version with Optimized Remux & Instant Piping)
 Streams MKV files ripped from DVDs with chapter data, subtitle selection, audio track selection,
 user profiles, watch progress tracking, and secure sandboxed path resolving.
 """
@@ -97,14 +97,12 @@ log = logging.getLogger("dvdserver")
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
-        # Dedicated profiles table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 username TEXT PRIMARY KEY,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Progress tracking table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS user_progress (
                 username TEXT NOT NULL,
@@ -253,13 +251,20 @@ def _remux_to_cache(path: Path, cache_file: Path, audio_idx: int, passthrough: b
     if cache_file.exists():
         _delete_cache_file(cache_file)
 
-    cmd = [FFMPEG, "-y", "-i", str(path),
-           "-map", "0:v:0", "-map", f"0:a:{audio_idx}", "-c:v", "copy"]
+    # Optimized FFmpeg parameters for low-power CPUs and fast I/O
+    cmd = [
+        FFMPEG, "-y",
+        "-analyzeduration", "1000000",
+        "-probesize", "1000000",
+        "-i", str(path),
+        "-map", "0:v:0", "-map", f"0:a:{audio_idx}", "-c:v", "copy"
+    ]
     if passthrough:
         cmd += ["-c:a", "copy"]
     else:
-        cmd += ["-c:a", "aac", "-b:a", "192k", "-ac", "2", "-threads", "0"]
-    cmd += [str(cache_file)]
+        cmd += ["-c:a", "aac", "-b:a", "128k", "-ac", "2", "-threads", "0"]
+    
+    cmd += ["-movflags", "+faststart", str(cache_file)]
 
     try:
         subprocess.run(cmd, capture_output=True, timeout=900)
@@ -619,7 +624,6 @@ def _rewrite_vtt_image_paths(vtt_text: str, title_idx: int) -> str:
 
 @app.route("/api/users", methods=["GET", "POST"])
 def handle_users():
-    """GET lists all registered profiles. POST adds a new profile immediately."""
     if request.method == "POST":
         payload = request.json or {}
         user = _sanitize_username(payload.get("username", ""))
@@ -632,7 +636,6 @@ def handle_users():
 
         return jsonify({"success": True, "username": user})
 
-    # GET method
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT username FROM users WHERE username != 'Guest' ORDER BY username ASC")
@@ -646,7 +649,6 @@ def get_progress():
     user = _sanitize_username(request.args.get("user", "Guest"))
     dvd_raw = request.args.get("dvd", "")
 
-    # Guest profile has no saved progress
     if user == "Guest":
         return jsonify({})
 
@@ -743,11 +745,6 @@ def load_dvd(dvd_name):
     total_gb = sum(t.get("size", 0) for t in titles) / (1024 ** 3)
     log.info(f"Loaded DVD '{dvd_name}': {len(titles)} title(s), {total_gb:.2f} GB")
     return jsonify({"title": dvd_name, "titles": titles})
-
-
-@app.route("/api/dvd/prewarm/<int:title_idx>", methods=["POST"])
-def prewarm_title(title_idx):
-    return jsonify({"started": False, "reason": "prewarm disabled; cache on play only"})
 
 
 @app.route("/api/dvd/cache-track/<int:title_idx>/<int:audio_idx>", methods=["POST"])
@@ -971,6 +968,7 @@ def stream_title(title_idx):
     if audio_idx < 0 or audio_idx >= max(1, len(tracks)):
         audio_idx = 0
 
+    # Default track: serve directly
     if audio_idx == 0:
         ext = path.suffix.lower()
         mimetype = {
@@ -993,14 +991,50 @@ def stream_title(title_idx):
     suffix = "copy" if audio_passthrough else "aac"
     cache_file = cache_dir / f"{path.stem}.a{audio_idx}.{suffix}.mp4"
 
-    lock = _get_cache_lock(cache_file)
-    with lock:
-        if _is_cache_valid(cache_file):
-            return send_file(cache_file, mimetype="video/mp4", conditional=True)
-        if not _remux_to_cache(path, cache_file, audio_idx, audio_passthrough):
-            return jsonify({"error": "Remux failed"}), 500
+    # If static cache is ready, serve it with full byte-range support
+    if _is_cache_valid(cache_file):
+        return send_file(cache_file, mimetype="video/mp4", conditional=True)
 
-    return send_file(cache_file, mimetype="video/mp4", conditional=True)
+    # Start background caching
+    threading.Thread(
+        target=_cache_one_track,
+        args=(title, title_idx, audio_idx),
+        daemon=True,
+    ).start()
+
+    # Instant playback via Fragmented MP4 (fMP4) pipe
+    cmd = [
+        FFMPEG, "-y",
+        "-analyzeduration", "1000000",
+        "-probesize", "1000000",
+        "-i", str(path),
+        "-map", "0:v:0", "-map", f"0:a:{audio_idx}",
+        "-c:v", "copy"
+    ]
+    if audio_passthrough:
+        cmd += ["-c:a", "copy"]
+    else:
+        cmd += ["-c:a", "aac", "-b:a", "128k", "-ac", "2", "-threads", "0"]
+
+    cmd += [
+        "-f", "mp4",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "pipe:1"
+    ]
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def generate():
+        try:
+            while True:
+                chunk = proc.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            proc.kill()
+
+    return Response(generate(), mimetype="video/mp4")
 
 
 @app.route("/api/dvd/subtitle-image/<int:title_idx>/<path:rel_path>", methods=["GET"])
@@ -1071,7 +1105,10 @@ def get_subtitle(title_idx, sub_id):
     if not cache_file.exists() or cache_file.stat().st_size == 0:
         try:
             result = subprocess.run(
-                [FFMPEG, "-y", "-i", str(mkv_path),
+                [FFMPEG, "-y",
+                 "-analyzeduration", "1000000",
+                 "-probesize", "1000000",
+                 "-i", str(mkv_path),
                  "-map", f"0:{track['stream_index']}",
                  "-c:s", "webvtt", str(cache_file)],
                 capture_output=True, text=True, encoding="utf-8",
