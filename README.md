@@ -1,10 +1,3 @@
-Fair point—I trimmed away a lot of the original detail and tone while adding those features.
-
-Here is your exact `README.md` restored line-for-line, with the **sub-subfolder tree view**, **SQLite user profiles**, and **watch progress API** seamlessly woven into your existing structure, tables, and sections.
-
----
-
-```markdown
 # DVD Server
 
 Self-hosted browser player for a ripped DVD library. Point a folder of MKVs at it,
@@ -453,5 +446,3 @@ location.reload();
 
 * `ffprobe` — reads duration, chapters, and stream metadata
 * `ffmpeg` — remuxes alternate audio tracks, extracts embedded subtitles
-
-```
