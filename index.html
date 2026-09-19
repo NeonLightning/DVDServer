@@ -1513,10 +1513,20 @@
             };
 
             const autoEl = document.getElementById("autoplayToggle");
-            autoEl.onchange = (e) => {
-                autoplayNext = e.target.checked;
-                localStorage.setItem("autoplayNext", autoplayNext ? "1" : "0");
-            };
+            if (autoEl) {
+                autoEl.onchange = (e) => {
+                    e.stopPropagation(); // Stop event from bubbling to player containers
+                    autoplayNext = e.target.checked;
+                    localStorage.setItem("autoplayNext", autoplayNext ? "1" : "0");
+                    autoEl.blur(); // Remove focus so Spacebar continues controlling video play/pause
+                };
+
+                // Prevent double-click bubbling from the label
+                const toggleLabel = autoEl.closest(".toggle");
+                if (toggleLabel) {
+                    toggleLabel.onclick = (e) => e.stopPropagation();
+                }
+            }
 
             const video = document.getElementById("videoPlayer");
             video.addEventListener("timeupdate", onTimeUpdate);
