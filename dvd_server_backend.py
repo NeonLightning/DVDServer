@@ -6,6 +6,16 @@ Supports nested library layout:
     dvds/<Genre>/<DVD Folder>/*.mkv
     dvds/<DVD Folder>/*.mkv          (no genre -> "Uncategorized")
     dvds/<Genre>/<Sub>/<DVD>/*.mkv   (deeper nesting also works)
+
+Also supports PNG+WebVTT image-cue subtitles produced by ripper.py's
+--backend png-webvtt mode:
+    <stem>.<lang>[.t<id>].vobsub.vtt          (WebVTT, cues point to PNGs)
+    <stem>.<lang>[.t<id>].vobsub.images/*.png (one PNG per cue)
+
+Image-based VTTs are served with their relative PNG paths rewritten to
+absolute API URLs so the browser can resolve them regardless of the VTT
+response's own URL. A dedicated /api/dvd/subtitle-image/... route serves
+the individual PNGs, sandboxed to the title's own folder.
 """
 
 from flask import Flask, jsonify, send_file, Response, request
@@ -53,7 +63,7 @@ log = logging.getLogger("dvdserver")
 
 
 # ---------- Configuration ----------
-DVD_FOLDER = BASE_DIR / "dvds"
+DVD_FOLDER = BASE_DIR / "../dvds"
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".webm", ".vob"}
 
 FFPROBE_CANDIDATES = [
@@ -405,8 +415,21 @@ def get_library():
 # ---------- Probing ----------
 
 def _guess_lang_from_filename(name):
-    m = re.search(r"\.([a-z]{2,3})(?:\.(?:forced|sdh|hi))?\.(?:srt|vtt)$", name.lower())
-    return m.group(1) if m else "und"
+    """Extract a language code from a sidecar subtitle filename.
+
+    Handles:
+      <stem>.<lang>.<ext>
+      <stem>.<lang>.<forced|sdh|hi>.<ext>
+      <stem>.<lang>[.t<id>].vobsub.vtt      (our PNG+WebVTT convention)
+    """
+    lower = name.lower()
+    m = re.search(r"\.([a-z]{2,3})(?:\.(?:forced|sdh|hi))?\.(?:srt|vtt)$", lower)
+    if m:
+        return m.group(1)
+    m = re.search(r"\.([a-z]{2,3})(?:\.t\d+)?\.vobsub\.vtt$", lower)
+    if m:
+        return m.group(1)
+    return "und"
 
 
 def _probe_subtitles(mkv_path, streams):
@@ -434,6 +457,7 @@ def _probe_subtitles(mkv_path, streams):
             "language": lang,
             "title": title,
             "playable": playable,
+            "image_based": False,
             "note": "" if playable else "Bitmap subtitle (VOBSUB/PGS) — not renderable in browser",
         })
         sub_n += 1
@@ -442,6 +466,25 @@ def _probe_subtitles(mkv_path, streams):
         for f in sorted(mkv_path.parent.glob(f"{mkv_path.stem}*{ext}")):
             if f.parent.name in (".subtitles", ".subtitle_work", ".remux"):
                 continue
+
+            # Our PNG+WebVTT output uses the ".vobsub.vtt" suffix. Detect it
+            # so the frontend can switch to the image-cue renderer.
+            is_vobsub_vtt = f.name.lower().endswith(".vobsub.vtt")
+
+            # Also mark any VTT that contains image references (defensive:
+            # users might rename files, or use a different ripper).
+            if not is_vobsub_vtt and ext == ".vtt":
+                try:
+                    sample = f.read_text(encoding="utf-8", errors="replace")[:4096]
+                    if (".png" in sample.lower()
+                            and ("--> " in sample)
+                            and ("<img" in sample.lower()
+                                 or re.search(r'^\s*\S+\.png\s*$',
+                                              sample, re.MULTILINE))):
+                        is_vobsub_vtt = True
+                except Exception:
+                    pass
+
             tracks.append({
                 "id": f"file:{f.name}",
                 "source": "external",
@@ -450,7 +493,9 @@ def _probe_subtitles(mkv_path, streams):
                 "language": _guess_lang_from_filename(f.name),
                 "title": f.name,
                 "playable": True,
-                "note": "",
+                "image_based": is_vobsub_vtt,
+                "note": ("Image-based cues (PNG) — rendered as overlay"
+                         if is_vobsub_vtt else ""),
             })
 
     return tracks
@@ -563,6 +608,55 @@ def srt_to_vtt(srt_text):
         srt_text += "\n"
     body = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", srt_text)
     return "WEBVTT\n\n" + body
+
+
+# ---------- Image-based WebVTT helpers ----------
+
+# Matches a bare PNG path on its own line, or a PNG path inside an <img src="">.
+# We only rewrite *relative* paths; absolute URLs, root-relative paths, and
+# data: URIs are left alone.
+_BARE_PNG_LINE_RE = re.compile(r'^[^\r\n]*?\.png[^\r\n]*$',
+                               re.MULTILINE | re.IGNORECASE)
+_IMG_SRC_RE = re.compile(r'<img\s+src=(["\'])([^"\']+)\1',
+                         re.IGNORECASE)
+
+
+def _rewrite_vtt_image_paths(vtt_text: str, title_idx: int) -> str:
+    """
+    Rewrite relative PNG references inside a WebVTT file into absolute
+    /api/dvd/subtitle-image/<title_idx>/... URLs, so the browser can fetch
+    them even though the VTT itself was served from
+    /api/dvd/subtitle/<idx>/<sub_id>.
+
+    Handles three cue payload forms produced by ripper.py:
+      1. Plain relative path:   images/0001.png
+      2. <img src="..."> wrapper
+      3. data:image/png;base64,...   (left unchanged)
+    """
+    prefix = f"/api/dvd/subtitle-image/{title_idx}/"
+
+    def _absolute(path: str) -> str:
+        p = path.strip()
+        if not p.lower().endswith(".png"):
+            return p
+        if p.startswith(("/", "http://", "https://", "data:")):
+            return p
+        return prefix + quote(p, safe="/")
+
+    # 1. <img src="..."> wrappers
+    def _img_repl(m):
+        q, p = m.group(1), m.group(2)
+        return f'<img src={q}{_absolute(p)}{q}'
+
+    vtt_text = _IMG_SRC_RE.sub(_img_repl, vtt_text)
+
+    # 2. Bare PNG path on its own line
+    def _line_repl(m):
+        return _absolute(m.group(0))
+
+    vtt_text = _BARE_PNG_LINE_RE.sub(_line_repl, vtt_text)
+
+    return vtt_text
 
 
 # ---------- Routes ----------
@@ -877,6 +971,78 @@ def stream_title(title_idx):
 
     return send_file(cache_file, mimetype="video/mp4", conditional=True)
 
+@app.route("/api/dvd/vobsub-image/<int:title_idx>/<path:relpath>", methods=["GET"])
+def get_vobsub_image(title_idx, relpath):
+    """Serve a PNG from a title's <stem>.vobsub.images/ directory."""
+    if not current_dvd["dvd_path"]:
+        return jsonify({"error": "No DVD loaded"}), 404
+    if not (0 <= title_idx < len(current_dvd["titles"])):
+        return jsonify({"error": "Invalid title index"}), 400
+
+    title = current_dvd["titles"][title_idx]
+    mkv_path = Path(title["path"]).resolve()
+    parent = mkv_path.parent
+
+    relpath = relpath.replace("\\", "/").strip("/")
+    if not relpath or ".." in relpath.split("/") or ":" in relpath:
+        return jsonify({"error": "Invalid path"}), 400
+    if not relpath.lower().endswith(".png"):
+        return jsonify({"error": "Not a PNG"}), 400
+
+    try:
+        candidate = (parent / relpath).resolve()
+    except (OSError, RuntimeError):
+        return jsonify({"error": "Invalid path"}), 400
+    try:
+        candidate.relative_to(parent)
+    except ValueError:
+        return jsonify({"error": "Invalid path"}), 400
+
+    if not candidate.is_file():
+        return jsonify({"error": "Image not found"}), 404
+    return send_file(candidate, mimetype="image/png")
+
+@app.route("/api/dvd/subtitle-image/<int:title_idx>/<path:filename>", methods=["GET"])
+def get_subtitle_image(title_idx, filename):
+    """Serve a PNG/JPG image used as a bitmap-subtitle overlay."""
+    if not current_dvd["dvd_path"]:
+        return jsonify({"error": "No DVD loaded"}), 404
+    if not (0 <= title_idx < len(current_dvd["titles"])):
+        return jsonify({"error": "Invalid title index"}), 400
+
+    # Reject traversal attempts
+    if (not filename or filename.startswith("/")
+            or "\\" in filename
+            or any(part in ("", ".", "..") for part in filename.split("/"))):
+        return jsonify({"error": "Invalid filename"}), 400
+
+    title = current_dvd["titles"][title_idx]
+    mkv_path = Path(title["path"])
+    base_dir = mkv_path.parent.resolve()
+
+    allowed = {
+        ".png":  "image/png",
+        ".jpg":  "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif":  "image/gif",
+        ".bmp":  "image/bmp",
+    }
+    suffix = Path(filename).suffix.lower()
+    if suffix not in allowed:
+        return jsonify({"error": "Unsupported image type"}), 400
+
+    try:
+        target = (base_dir / filename).resolve()
+        target.relative_to(base_dir)
+    except (OSError, ValueError):
+        return jsonify({"error": "Invalid path"}), 400
+
+    if not target.is_file():
+        log.warning(f"Subtitle image missing: {target}")
+        return jsonify({"error": "Image not found"}), 404
+
+    return send_file(target, mimetype=allowed[suffix], conditional=True)
 
 @app.route("/api/dvd/subtitle/<int:title_idx>/<path:sub_id>", methods=["GET"])
 def get_subtitle(title_idx, sub_id):
@@ -904,14 +1070,28 @@ def get_subtitle(title_idx, sub_id):
         if not src.exists():
             log.warning(f"Sidecar subtitle missing: {src}")
             return jsonify({"error": "Subtitle file missing"}), 404
+
         if src.suffix.lower() == ".vtt":
+            # Image-based VTTs need their relative PNG paths rewritten to
+            # absolute URLs, because the browser resolves them against this
+            # response's URL, not against the file on disk.
+            if track.get("image_based"):
+                try:
+                    text = src.read_text(encoding="utf-8", errors="replace")
+                except Exception as e:
+                    log.error(f"Could not read {src}: {e}")
+                    return jsonify({"error": f"Could not read subtitle: {e}"}), 500
+                text = _rewrite_vtt_image_paths(text, title_idx)
+                return Response(text, content_type="text/vtt; charset=utf-8")
             return send_file(src, mimetype="text/vtt")
+
+        # .srt sidecar -> convert to VTT
         try:
             text = src.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             log.error(f"Could not read {src}: {e}")
             return jsonify({"error": f"Could not read subtitle: {e}"}), 500
-        return Response(srt_to_vtt(text), mimetype="text/vtt")
+        return Response(srt_to_vtt(text), content_type="text/vtt; charset=utf-8")
 
     if not track.get("playable"):
         return jsonify({
@@ -957,6 +1137,48 @@ def get_subtitle(title_idx, sub_id):
             }), 500
 
     return send_file(cache_file, mimetype="text/vtt")
+
+
+@app.route("/api/dvd/subtitle-image/<int:title_idx>/<path:rel_path>", methods=["GET"])
+def get_subtitle_image(title_idx, rel_path):
+    """
+    Serve a single PNG that belongs to an image-based VTT subtitle track.
+
+    rel_path is relative to the title's own folder (the MKV's parent). The
+    resolution is sandboxed: the final path must stay inside that folder,
+    must end in .png, and must not contain traversal segments.
+    """
+    if not current_dvd["dvd_path"]:
+        return jsonify({"error": "No DVD loaded"}), 404
+    if not (0 <= title_idx < len(current_dvd["titles"])):
+        return jsonify({"error": "Invalid title index"}), 400
+
+    title = current_dvd["titles"][title_idx]
+    mkv_dir = Path(title["path"]).parent.resolve()
+
+    # Reject anything obviously wrong before touching the filesystem.
+    if not rel_path or ".." in rel_path.split("/") or rel_path.startswith(("/", "\\")):
+        return jsonify({"error": "Invalid path"}), 400
+    if not rel_path.lower().endswith(".png"):
+        return jsonify({"error": "Not a PNG"}), 400
+
+    try:
+        candidate = (mkv_dir / rel_path).resolve()
+    except (OSError, RuntimeError):
+        return jsonify({"error": "Invalid path"}), 400
+
+    # Final sandbox check: the resolved path must still be inside mkv_dir.
+    try:
+        candidate.relative_to(mkv_dir)
+    except ValueError:
+        log.warning(f"Subtitle image escapes title folder: {rel_path!r}")
+        return jsonify({"error": "Invalid path"}), 400
+
+    if not candidate.is_file():
+        log.warning(f"Subtitle image not found: {candidate}")
+        return jsonify({"error": "Image not found"}), 404
+
+    return send_file(candidate, mimetype="image/png", conditional=True)
 
 
 @app.route("/<path:filename>", methods=["GET"])

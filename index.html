@@ -344,6 +344,7 @@
         .title-select:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .video-player {
+            isolation: isolate;
             flex: 1;
             background: var(--video-bg);
             border-radius: 8px;
@@ -369,6 +370,28 @@
             color: #fff;
             font-size: 1.1em;
             text-shadow: 1px 1px 2px #000;
+        }
+
+        /* ---------- VobSub image-based subtitle overlay ----------
+           Browsers can't render image payloads inside WebVTT cues, so
+           png-webvtt subtitles are drawn as a positioned <img> layer
+           on top of the video, driven by video.currentTime. */
+        .vobsub-overlay {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            pointer-events: none;
+            z-index: 4;
+            display: none;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.40); /* Semi-transparent dark background */
+            padding: 6px 12px;               /* Padding around the subtitle PNG */
+        }
+
+        .vobsub-overlay img {
+            display: block;                   /* Prevents inline baseline whitespace gaps */
+            max-width: 90vw;
+            height: auto;
         }
 
         .cover-overlay {
@@ -1244,6 +1267,9 @@
                         <video id="videoPlayer" preload="metadata">
                             Your browser doesn't support HTML5 video.
                         </video>
+                        <div class="vobsub-overlay">
+                            <img alt="">
+                        </div>
                         <div class="player-controls" id="playerControls">
                             <button class="ctrl-btn" id="playPauseBtn" title="Play/Pause (Space)">
                                 <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
@@ -1292,6 +1318,11 @@
                     <div class="status" id="playingStatus">Select a chapter to jump</div>
                 </div>
             `;
+
+            // Reset VobSub state for the fresh player instance
+            vobsubCues = null;
+            vobsubCurrentIdx = -1;
+            vobsubOverlay = null;
 
             setupCoverOverlay();
 
@@ -1426,6 +1457,11 @@
                 activeChapterIdx = -1;
                 currentAudio = data.audio || [];
                 currentSubtitles = data.subtitles || [];
+
+                // Reset any image-based subtitle that belonged to the previous title
+                vobsubCues = null;
+                vobsubCurrentIdx = -1;
+                if (vobsubOverlay) vobsubOverlay.style.display = "none";
 
                 const video = document.getElementById("videoPlayer");
                 recoveringSrc = null;
@@ -1672,21 +1708,249 @@
 
         let subtitleBlobUrl = null;
 
+        // ---------- VobSub (image-based) subtitle renderer ----------
+        let vobsubCues = null;       // [{start, end, src}, ...] sorted by start
+        let vobsubOverlay = null;    // The positioned <div> overlay in the player
+        let vobsubCurrentIdx = -1;   // Index of displayed cue, -1 = none
+        let vobsubImageLoadingUrl = null;
+
+        function parseImageVtt(text) {
+            if (!text) return [];
+            if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+            text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+            const cues = [];
+            for (const block of text.split(/\n\s*\n/)) {
+                const lines = block.split("\n").map(l => l.trim()).filter(Boolean);
+                if (lines.length < 2) continue;
+
+                let i = 0;
+                if (!/-->/.test(lines[0])) i = 1;
+                if (i >= lines.length) continue;
+
+                const m = lines[i].match(
+                    /(\d+):(\d+):(\d+)[.,](\d+)\s*-->\s*(\d+):(\d+):(\d+)[.,](\d+)/
+                );
+                if (!m) continue;
+
+                const start = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 1000;
+                const end   = (+m[5]) * 3600 + (+m[6]) * 60 + (+m[7]) + (+m[8]) / 1000;
+
+                const payload = lines.slice(i + 1).join("\n").trim();
+                if (!payload) continue;
+
+                cues.push({ start, end, src: payload });
+            }
+            cues.sort((a, b) => a.start - b.start);
+            return cues;
+        }
+
+        function ensureVobsubOverlay() {
+            const player = document.getElementById("videoPlayerContainer");
+            if (!player) return null;
+            let overlay = player.querySelector(".vobsub-overlay");
+            if (!overlay) {
+                overlay = document.createElement("div");
+                overlay.className = "vobsub-overlay";
+                const img = document.createElement("img");
+                img.alt = "";
+                overlay.appendChild(img);
+                player.appendChild(overlay);
+            }
+            return overlay;
+        }
+
+        function resolveVobsubImageSrc(raw) {
+            if (!raw) return raw;
+            if (raw.startsWith("data:")) return raw;
+
+            const m = raw.match(/<img\s+[^>]*src="([^"]+)"/i);
+            if (m) raw = m[1];
+            raw = raw.trim();
+
+            const serverRoute = raw.match(
+                /^\/api\/dvd\/(?:vobsub|subtitle)-image\/\d+\/(.+)$/
+            );
+            if (serverRoute) {
+                return `${API_URL}/dvd/vobsub-image/${currentTitleIdx}/${serverRoute[1]}`;
+            }
+
+            if (/^https?:\/\//i.test(raw)) return raw;
+
+            raw = raw.replace(/^\.\//, "").replace(/^\/+/, "");
+            return `${API_URL}/dvd/vobsub-image/${currentTitleIdx}/${encodePath(raw)}`;
+        }
+
+        function getVideoRenderArea(video) {
+            const videoW = video.videoWidth || 720;
+            const videoH = video.videoHeight || 480;
+            const containerW = video.clientWidth || 0;
+            const containerH = video.clientHeight || 0;
+
+            if (!containerW || !containerH) {
+                return { renderW: containerW, renderH: containerH, scaleX: 1, scaleY: 1, left: 0, bottom: 0 };
+            }
+
+            const videoAspect = videoW / videoH;
+            const containerAspect = containerW / containerH;
+
+            let renderW, renderH;
+            if (containerAspect > videoAspect) {
+                renderH = containerH;
+                renderW = renderH * videoAspect;
+            } else {
+                renderW = containerW;
+                renderH = renderW / videoAspect;
+            }
+
+            const scaleX = renderW / videoW;
+            const scaleY = renderH / videoH;
+            const left = (containerW - renderW) / 2;
+            const bottom = (containerH - renderH) / 2;
+
+            return { renderW, renderH, scaleX, scaleY, left, bottom };
+        }
+
+        function applyVobsubScale(overlay, video) {
+            const img = overlay.querySelector("img");
+            if (!img || !img.naturalWidth || !img.naturalHeight) return;
+
+            const area = getVideoRenderArea(video);
+
+            // Add a multiplier (e.g., 0.8 for 80% size, 0.7 for 70%)
+            const SUBTITLE_SCALE = 0.7;
+
+            const scaledWidth = Math.round(img.naturalWidth * area.scaleX * SUBTITLE_SCALE);
+            const scaledHeight = Math.round(img.naturalHeight * area.scaleY * SUBTITLE_SCALE);
+
+            img.style.width = scaledWidth + "px";
+            img.style.height = scaledHeight + "px";
+            overlay.style.bottom = "8px";
+        }
+
+        function updateVobsubOverlay() {
+            if (!vobsubCues) return;
+            vobsubOverlay = ensureVobsubOverlay();
+            if (!vobsubOverlay) return;
+
+            const video = document.getElementById("videoPlayer");
+            if (!video) return;
+
+            const t = video.currentTime || 0;
+            let idx = -1;
+            for (let i = 0; i < vobsubCues.length; i++) {
+                if (t < vobsubCues[i].start) break;
+                if (t <= vobsubCues[i].end) { idx = i; break; }
+            }
+
+            if (idx === vobsubCurrentIdx) return;
+            vobsubCurrentIdx = idx;
+
+            if (idx === -1) {
+                vobsubOverlay.style.display = "none";
+                vobsubImageLoadingUrl = null;
+                return;
+            }
+
+            const img = vobsubOverlay.querySelector("img");
+            const url = resolveVobsubImageSrc(vobsubCues[idx].src);
+
+            if (vobsubImageLoadingUrl !== url) {
+                vobsubImageLoadingUrl = url;
+
+                const tempImg = new Image();
+                tempImg.onload = () => {
+                    if (vobsubImageLoadingUrl === url) {
+                        img.src = url;
+                        applyVobsubScale(vobsubOverlay, video);
+                        vobsubOverlay.style.display = "block";
+                    }
+                };
+                tempImg.onerror = () => {
+                    if (vobsubImageLoadingUrl === url) {
+                        vobsubOverlay.style.display = "none";
+                    }
+                };
+                tempImg.src = url;
+            } else if (img.complete && img.naturalWidth > 0) {
+                applyVobsubScale(vobsubOverlay, video);
+                vobsubOverlay.style.display = "block";
+            }
+        }
+
+        async function loadVobsubSubtitle(track) {
+            const url = `${API_URL}/dvd/subtitle/${currentTitleIdx}/${encodeURIComponent(track.id)}`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    showMessage(`Subtitle failed: HTTP ${response.status}`, "error");
+                    return;
+                }
+                const text = await response.text();
+                const cues = parseImageVtt(text);
+                if (cues.length === 0) {
+                    showMessage("Image subtitle contained no usable cues.", "error");
+                    return;
+                }
+                vobsubCues = cues;
+                vobsubCurrentIdx = -1;
+                vobsubOverlay = ensureVobsubOverlay();
+                updateVobsubOverlay();
+                console.log(`[VobSub] Loaded ${cues.length} image cue(s)`);
+            } catch (e) {
+                console.error("VobSub load failed:", e);
+                showMessage(`Subtitle load failed: ${e.message}`, "error");
+            }
+        }
+
+        function clearVobsubOverlay() {
+            vobsubCues = null;
+            vobsubCurrentIdx = -1;
+            vobsubImageLoadingUrl = null;
+            const stray = document.querySelector(".vobsub-overlay");
+            if (stray) {
+                stray.style.display = "none";
+                const img = stray.querySelector("img");
+                if (img) {
+                    img.removeAttribute("src");
+                    img.removeAttribute("data-src");
+                    img.style.width = "";
+                    img.style.height = "";
+                }
+            }
+        }
+
         async function setSubtitle(trackId) {
             const video = document.getElementById("videoPlayer");
             if (!video) return;
 
+            // Clear text tracks
             video.querySelectorAll("track").forEach(t => t.remove());
             if (subtitleBlobUrl) {
                 URL.revokeObjectURL(subtitleBlobUrl);
                 subtitleBlobUrl = null;
             }
 
+            // Clear image overlay
+            clearVobsubOverlay();
+
             if (!trackId || trackId === "off") return;
 
             const track = currentSubtitles.find(t => t.id === trackId);
             if (!track) return;
 
+            // png-webvtt output: image-based cues, need the custom renderer.
+            const isImageBased =
+                track.source === "external" &&
+                typeof track.filename === "string" &&
+                track.filename.toLowerCase().includes(".vobsub.vtt");
+
+            if (isImageBased) {
+                await loadVobsubSubtitle(track);
+                return;
+            }
+
+            // ---- Existing text-subtitle path ----
             if (!track.playable) {
                 showMessage(track.note || "This subtitle can't be shown in the browser.", "error");
                 return;
@@ -1830,6 +2094,7 @@
             try { video.pause(); } catch (e) {}
             video.removeAttribute("src");
             video.querySelectorAll("track").forEach(t => t.remove());
+            clearVobsubOverlay();
             try { video.load(); } catch (e) {}
         }
 
@@ -2001,6 +2266,28 @@
             const fullscreenBtn = document.getElementById("fullscreenBtn");
             if (!video || !player) return;
 
+            // Grab the overlay element that renderPlayer injected.
+            vobsubOverlay = ensureVobsubOverlay();
+
+            // Re-scale the VobSub overlay whenever the player box changes
+            // size — window resize, fullscreen toggle, dim-mode, etc.
+            if (typeof ResizeObserver === "function") {
+                const vobsubResizeObserver = new ResizeObserver(() => {
+                    if (vobsubOverlay && vobsubOverlay.style.display !== "none") {
+                        applyVobsubScale(vobsubOverlay, video);
+                    }
+                });
+                vobsubResizeObserver.observe(video);
+            } else {
+                const rescale = () => {
+                    if (vobsubOverlay && vobsubOverlay.style.display !== "none") {
+                        applyVobsubScale(vobsubOverlay, video);
+                    }
+                };
+                window.addEventListener("resize", rescale);
+                document.addEventListener("fullscreenchange", rescale);
+            }
+
             const ICON_PLAY = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
             const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z" fill="currentColor"/></svg>';
             const ICON_VOL_HIGH = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" fill="currentColor"/></svg>';
@@ -2061,10 +2348,22 @@
                 timeDisplay.textContent = `${fmtPlayerTime(video.currentTime)} / ${fmtPlayerTime(dur)}`;
             }
 
-            video.addEventListener("timeupdate", updateProgress);
-            video.addEventListener("loadedmetadata", updateProgress);
+            // Single listener per event; progress + VobSub overlay both
+            // update on the same tick.
+            video.addEventListener("timeupdate", () => {
+                updateProgress();
+                updateVobsubOverlay();
+            });
+            video.addEventListener("seeked", () => {
+                updateProgress();
+                updateVobsubOverlay();
+            });
             video.addEventListener("durationchange", updateProgress);
-            video.addEventListener("seeked", updateProgress);
+            video.addEventListener("loadedmetadata", () => {
+                updateProgress();
+                vobsubCurrentIdx = -1;
+                updateVobsubOverlay();
+            });
 
             video.addEventListener("progress", () => {
                 const dur = video.duration;
@@ -2218,7 +2517,8 @@
                 "loadDVDList","toggleGenre","loadDVD","computeTitleOrder",
                 "renderPlayer","setupCoverOverlay","selectTitle",
                 "populateTitleSelect","populateAudioSelect","populateSubtitleSelect",
-                "setupCustomControls"
+                "setupCustomControls","updateVobsubOverlay","loadVobsubSubtitle",
+                "applyVobsubScale","parseImageVtt"
             ];
             const missing = required.filter(n => typeof window[n] !== "function");
             if (missing.length) {
