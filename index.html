@@ -48,10 +48,6 @@
             color: var(--text-dim);
         }
 
-        /* ============================================================
-           DVD LIST
-           ============================================================ */
-
         .dvd-list { list-style: none; }
 
         .genre-header {
@@ -172,10 +168,6 @@
             line-height: 1.2;
         }
 
-        /* ============================================================
-           SETTINGS PANEL
-           ============================================================ */
-
         .settings-panel {
             margin-top: 20px;
             border-top: 1px solid var(--border);
@@ -196,10 +188,6 @@
             letter-spacing: 1px;
             flex-shrink: 0;
         }
-
-        /* ============================================================
-           CACHE PANEL
-           ============================================================ */
 
         .cache-panel {
             margin-top: 20px;
@@ -290,10 +278,6 @@
         .cache-button:hover { background: var(--card-hover); border-color: var(--accent); }
         .cache-button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        /* ============================================================
-           PLAYER SECTION
-           ============================================================ */
-
         .player-section {
             flex: 1;
             display: flex;
@@ -372,10 +356,6 @@
             text-shadow: 1px 1px 2px #000;
         }
 
-        /* ---------- VobSub image-based subtitle overlay ----------
-           Browsers can't render image payloads inside WebVTT cues, so
-           png-webvtt subtitles are drawn as a positioned <img> layer
-           on top of the video, driven by video.currentTime. */
         .vobsub-overlay {
             position: absolute;
             left: 50%;
@@ -384,12 +364,12 @@
             z-index: 4;
             display: none;
             text-align: center;
-            background: rgba(0, 0, 0, 0.40); /* Semi-transparent dark background */
-            padding: 6px 12px;               /* Padding around the subtitle PNG */
+            background: rgba(0, 0, 0, 0.40);
+            padding: 6px 12px;
         }
 
         .vobsub-overlay img {
-            display: block;                   /* Prevents inline baseline whitespace gaps */
+            display: block;
             max-width: 90vw;
             height: auto;
         }
@@ -636,9 +616,6 @@
             transition: transform 0.15s;
         }
 
-        .ctrl-volume:hover::-webkit-slider-thumb { transform: scale(1.25); }
-        .ctrl-volume:hover::-moz-range-thumb { transform: scale(1.25); }
-
         .toggle-group {
             display: flex;
             gap: 12px;
@@ -683,7 +660,6 @@
 
         .toggle input:checked + .track { background: var(--accent-dim); }
         .toggle input:checked + .track::after { left: 18px; background: var(--accent); }
-        .toggle:hover .track { border: 1px solid var(--accent); }
 
         .dim-overlay {
             position: fixed;
@@ -768,8 +744,6 @@
             flex-shrink: 0;
         }
 
-        .menu-button.active .chap-time { color: var(--accent-soft); }
-
         .status {
             padding: 12px;
             background: var(--card);
@@ -835,6 +809,10 @@
             <div class="settings-panel">
                 <h2>Settings</h2>
                 <div class="setting-row">
+                    <label for="userSelect">Profile</label>
+                    <select id="userSelect" class="title-select"></select>
+                </div>
+                <div class="setting-row">
                     <label for="themeSelect">Theme</label>
                     <select id="themeSelect" class="title-select"></select>
                 </div>
@@ -896,8 +874,15 @@
         let loadedAudioIdx = 0;
         let titleOrder = [];
 
-        // Which genres are expanded. Persisted across reloads.
-        // Empty array = every genre collapsed on first run.
+        // Watch state and progress variables
+        let currentUser = localStorage.getItem("currentUser") || "Guest";
+        let currentDVDProgress = {}; 
+        let lastSavedPos = 0;
+
+        const ICON_WATCHED = "✓ ";
+        const ICON_IN_PROGRESS = "◐ ";
+        const ICON_UNWATCHED = "○ ";
+
         let expandedGenres = (() => {
             try {
                 const saved = localStorage.getItem("expandedGenres");
@@ -905,7 +890,7 @@
                     const parsed = JSON.parse(saved);
                     if (Array.isArray(parsed)) return parsed;
                 }
-            } catch (e) { /* corrupt storage — ignore */ }
+            } catch (e) { }
             return [];
         })();
 
@@ -917,14 +902,9 @@
         let dimmed = localStorage.getItem("dimmed") === "1";
         let coverVisible = false;
 
-        // ---------- URL encoding for path-like DVD names ----------
-        // Encodes each segment separately so "/" is preserved as a real
-        // path separator (Flask's <path:...> converter needs it).
         function encodePath(p) {
             return String(p).split("/").map(encodeURIComponent).join("/");
         }
-
-        // ---------- DVD name splitting ----------
 
         function splitDvdName(name) {
             const idx = name.lastIndexOf("(");
@@ -956,8 +936,6 @@
             return container;
         }
 
-        // ---------- Theme / dim ----------
-
         function applyTheme(name) {
             document.body.className = document.body.className
                 .split(" ")
@@ -972,16 +950,13 @@
             document.body.classList.toggle("dimmed", on);
         }
 
-        // ---------- Theme discovery ----------
-
         function discoverThemes() {
             const themes = [];
             const seen = new Set();
 
             for (const sheet of document.styleSheets) {
                 let rules;
-                try { rules = sheet.cssRules; }
-                catch (e) { continue; }
+                try { rules = sheet.cssRules; } catch (e) { continue; }
 
                 for (const rule of rules) {
                     if (!rule.selectorText) continue;
@@ -995,26 +970,19 @@
 
                         let label = "";
                         try {
-                            label = rule.style
-                                .getPropertyValue("--theme-name")
-                                .trim()
-                                .replace(/^["']|["']$/g, "");
+                            label = rule.style.getPropertyValue("--theme-name").trim().replace(/^["']|["']$/g, "");
                         } catch (e) { }
 
                         if (!label) {
-                            label = id.replace(/[-_]/g, " ")
-                                      .replace(/\b\w/g, c => c.toUpperCase());
+                            label = id.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
                         }
 
                         themes.push({ id, label });
                     }
                 }
             }
-
             return themes;
         }
-
-        // ---------- Helpers ----------
 
         function fmtTime(sec) {
             if (!isFinite(sec) || sec < 0) return "0:00";
@@ -1044,7 +1012,124 @@
             return `${m}m`;
         }
 
-        // ---------- DVD list (grouped by genre, collapsible) ----------
+        // ---------- User Profiles & Progress ----------
+
+        async function loadUsers() {
+            try {
+                const res = await fetch(`${API_URL}/users`);
+                if (!res.ok) return;
+                const data = await res.json();
+                const sel = document.getElementById("userSelect");
+                if (!sel) return;
+
+                sel.innerHTML = "";
+                (data.users || ["Guest"]).forEach(u => {
+                    const opt = document.createElement("option");
+                    opt.value = u;
+                    opt.textContent = u;
+                    sel.appendChild(opt);
+                });
+
+                const newOpt = document.createElement("option");
+                newOpt.value = "__new__";
+                newOpt.textContent = "+ Add Profile...";
+                sel.appendChild(newOpt);
+
+                if (data.users && data.users.includes(currentUser)) {
+                    sel.value = currentUser;
+                } else {
+                    currentUser = "Guest";
+                    localStorage.setItem("currentUser", "Guest");
+                    sel.value = "Guest";
+                }
+
+                sel.onchange = async (e) => {
+                    if (e.target.value === "__new__") {
+                        const name = prompt("Enter new profile name:")?.trim();
+                        if (name && name.toLowerCase() !== "guest") {
+                            const postRes = await fetch(`${API_URL}/users`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ username: name })
+                            });
+
+                            if (postRes.ok) {
+                                const resData = await postRes.json();
+                                currentUser = resData.username;
+                                localStorage.setItem("currentUser", currentUser);
+                            } else {
+                                alert("Could not create profile. Use letters, numbers, spaces, or hyphens.");
+                            }
+                        }
+                        
+                        await loadUsers();
+                        if (currentDVD) {
+                            await fetchProgress();
+                            populateTitleSelect();
+                        }
+                        return;
+                    }
+
+                    currentUser = e.target.value;
+                    localStorage.setItem("currentUser", currentUser);
+                    if (currentDVD) {
+                        await fetchProgress();
+                        populateTitleSelect();
+                    }
+                };
+            } catch (e) {
+                console.error("Failed to load users:", e);
+            }
+        }
+
+        async function fetchProgress() {
+            if (!currentDVD) return;
+            try {
+                const res = await fetch(`${API_URL}/progress?user=${encodeURIComponent(currentUser)}&dvd=${encodeURIComponent(currentDVD.title)}`);
+                currentDVDProgress = await res.json();
+            } catch (e) {
+                console.error("Failed to fetch progress:", e);
+                currentDVDProgress = {};
+            }
+        }
+
+        async function saveProgress(force = false) {
+            const video = document.getElementById("videoPlayer");
+            if (!video || !currentDVD || !video.duration) return;
+
+            const pos = video.currentTime || 0;
+            if (!force && Math.abs(pos - lastSavedPos) < 5) return;
+            lastSavedPos = pos;
+
+            const dur = video.duration;
+            const isWatched = (pos / dur) >= 0.90;
+
+            currentDVDProgress[currentTitleIdx] = {
+                position: pos,
+                duration: dur,
+                watched: isWatched ? 1 : (currentDVDProgress[currentTitleIdx]?.watched || 0)
+            };
+
+            populateTitleSelect();
+
+            try {
+                await fetch(`${API_URL}/progress`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        user: currentUser,
+                        dvd: currentDVD.title,
+                        title_idx: currentTitleIdx,
+                        position: pos,
+                        duration: dur
+                    })
+                });
+            } catch (e) {
+                console.error("Failed to save progress:", e);
+            }
+        }
+
+        // ---------- DVD Library List ----------
 
         async function loadDVDList() {
             try {
@@ -1056,7 +1141,7 @@
                 dvdList.innerHTML = "";
 
                 if (!data.genres || data.genres.length === 0) {
-                    dvdList.innerHTML = "<li class='dvd-item'>No DVDs found. Rip some with ripper.py</li>";
+                    dvdList.innerHTML = "<li class='dvd-item'>No DVDs found.</li>";
                     updateConnectionStatus("No DVDs");
                     return;
                 }
@@ -1071,7 +1156,6 @@
                     header.setAttribute("role", "button");
                     header.setAttribute("tabindex", "0");
                     header.setAttribute("aria-expanded", isExpanded ? "true" : "false");
-                    header.title = isExpanded ? "Click to collapse" : "Click to expand";
 
                     const chevron = document.createElement("span");
                     chevron.className = "genre-chevron";
@@ -1090,13 +1174,6 @@
 
                     const nameForClick = gname;
                     header.onclick = () => toggleGenre(nameForClick);
-                    header.onkeydown = (e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            toggleGenre(nameForClick);
-                        }
-                    };
-
                     dvdList.appendChild(header);
 
                     genre.dvds.forEach(dvd => {
@@ -1127,10 +1204,6 @@
                         }
 
                         const nameEl = buildDvdNameEl(dvd.display_name);
-                        if (dvd.subpath) {
-                            nameEl.title = `${dvd.name}`;
-                        }
-
                         li.appendChild(thumb);
                         li.appendChild(nameEl);
                         li.onclick = () => loadDVD(dvd.name);
@@ -1154,15 +1227,11 @@
             if (isNowExpanded) expandedGenres.push(genreName);
             else expandedGenres.splice(idx, 1);
 
-            try {
-                localStorage.setItem("expandedGenres", JSON.stringify(expandedGenres));
-            } catch (e) { /* private mode, etc. */ }
+            try { localStorage.setItem("expandedGenres", JSON.stringify(expandedGenres)); } catch (e) {}
 
             document.querySelectorAll(".genre-header").forEach(h => {
                 if ((h.dataset.genreName || "") !== genreName) return;
                 h.classList.toggle("expanded", isNowExpanded);
-                h.setAttribute("aria-expanded", isNowExpanded ? "true" : "false");
-                h.title = isNowExpanded ? "Click to collapse" : "Click to expand";
             });
             document.querySelectorAll(".dvd-item").forEach(item => {
                 if ((item.dataset.genreName || "") !== genreName) return;
@@ -1170,24 +1239,18 @@
             });
         }
 
-        // ---------- Load a DVD ----------
-
         async function loadDVD(dvdName) {
             try {
                 unloadVideo();
                 await new Promise(r => setTimeout(r, 80));
 
                 if (cacheMode === "on_dvd_change" && currentDVD && currentDVD.title) {
-                    console.log(`[Cache] Switching DVD - clearing cache for ${currentDVD.title}`);
                     await clearCacheForDVD(currentDVD.title, true);
                 }
 
                 showMessage("Loading DVD...", "info");
 
-                const response = await fetch(`${API_URL}/dvd/load/${encodePath(dvdName)}`, {
-                    method: "POST"
-                });
-
+                const response = await fetch(`${API_URL}/dvd/load/${encodePath(dvdName)}`, { method: "POST" });
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({ error: "Unknown error" }));
                     showMessage(`Error: ${error.error}`, "error");
@@ -1195,6 +1258,7 @@
                 }
 
                 currentDVD = await response.json();
+                await fetchProgress();
                 prewarmedTitles = new Set();
                 computeTitleOrder();
 
@@ -1206,10 +1270,7 @@
                 selectTitle(titleOrder[0]);
                 loadCacheInfo();
 
-                showMessage(
-                    `Loaded: ${dvdName} — ${currentDVD.titles.length} title(s)`,
-                    "success"
-                );
+                showMessage(`Loaded: ${dvdName} — ${currentDVD.titles.length} title(s)`, "success");
             } catch (error) {
                 console.error("Error loading DVD:", error);
                 showMessage("Failed to load DVD", "error");
@@ -1228,14 +1289,10 @@
             } else if (sortMode === "size") {
                 idxs.sort((a, b) => (t[a].size || 0) - (t[b].size || 0));
             } else {
-                idxs.sort((a, b) =>
-                    t[a].file.localeCompare(t[b].file, undefined, { numeric: true })
-                );
+                idxs.sort((a, b) => t[a].file.localeCompare(t[b].file, undefined, { numeric: true }));
             }
             titleOrder = idxs;
         }
-
-        // ---------- Render player skeleton ----------
 
         function renderPlayer() {
             const playerSection = document.getElementById("playerSection");
@@ -1256,7 +1313,7 @@
                                 <option value="longest">Longest first</option>
                                 <option value="size">Smallest file</option>
                             </select>
-                            <label class="toggle" title="Automatically play the next title when this one ends">
+                            <label class="toggle" title="Autoplay next title">
                                 <input type="checkbox" id="autoplayToggle" ${autoplayNext ? "checked" : ""}>
                                 <span class="track"></span>
                                 <span>Autoplay</span>
@@ -1264,17 +1321,11 @@
                         </div>
                     </div>
                     <div class="video-player" id="videoPlayerContainer">
-                        <video id="videoPlayer" preload="metadata">
-                            Your browser doesn't support HTML5 video.
-                        </video>
-                        <div class="vobsub-overlay">
-                            <img alt="">
-                        </div>
+                        <video id="videoPlayer" preload="metadata"></video>
+                        <div class="vobsub-overlay"><img alt=""></div>
                         <div class="player-controls" id="playerControls">
-                            <button class="ctrl-btn" id="playPauseBtn" title="Play/Pause (Space)">
-                                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-                                    <path d="M8 5v14l11-7z" fill="currentColor"/>
-                                </svg>
+                            <button class="ctrl-btn" id="playPauseBtn" title="Play/Pause">
+                                <svg viewBox="0 0 24 24" width="22" height="22"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
                             </button>
                             <span class="ctrl-time" id="timeDisplay">0:00 / 0:00</span>
                             <div class="ctrl-progress" id="progressBar">
@@ -1282,16 +1333,12 @@
                                 <div class="ctrl-progress-played" id="playedBar"></div>
                                 <div class="ctrl-progress-knob" id="progressKnob"></div>
                             </div>
-                            <button class="ctrl-btn" id="muteBtn" title="Mute (M)">
-                                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" fill="currentColor"/>
-                                </svg>
+                            <button class="ctrl-btn" id="muteBtn" title="Mute">
+                                <svg viewBox="0 0 24 24" width="20" height="20"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" fill="currentColor"/></svg>
                             </button>
-                            <input type="range" class="ctrl-volume" id="volumeSlider" min="0" max="1" step="0.05" value="1" title="Volume">
-                            <button class="ctrl-btn" id="fullscreenBtn" title="Fullscreen (F)">
-                                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                                    <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/>
-                                </svg>
+                            <input type="range" class="ctrl-volume" id="volumeSlider" min="0" max="1" step="0.05" value="1">
+                            <button class="ctrl-btn" id="fullscreenBtn" title="Fullscreen">
+                                <svg viewBox="0 0 24 24" width="20" height="20"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/></svg>
                             </button>
                         </div>
                         <div class="cover-overlay" id="coverOverlay">
@@ -1304,9 +1351,7 @@
                                 <p class="cover-meta" id="coverMeta"></p>
                             </div>
                             <button class="play-dvd-btn" id="playDvdBtn" type="button">
-                                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                                    <path d="M8 5v14l11-7z" fill="currentColor"/>
-                                </svg>
+                                <svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
                                 <span>Play</span>
                             </button>
                         </div>
@@ -1319,16 +1364,14 @@
                 </div>
             `;
 
-            // Reset VobSub state for the fresh player instance
             vobsubCues = null;
             vobsubCurrentIdx = -1;
             vobsubOverlay = null;
 
             setupCoverOverlay();
-
             populateTitleSelect();
-            document.getElementById("titleSelect").onchange =
-                (e) => selectTitle(parseInt(e.target.value, 10));
+
+            document.getElementById("titleSelect").onchange = (e) => selectTitle(parseInt(e.target.value, 10));
 
             const sortEl = document.getElementById("sortSelect");
             sortEl.value = sortMode;
@@ -1370,13 +1413,13 @@
             const metaEl = document.getElementById("coverMeta");
 
             const shortName = dvdName.split("/").pop() || dvdName;
-
             titleEl.innerHTML = "";
             const { main, sub } = splitDvdName(shortName);
             const mainEl = document.createElement("div");
             mainEl.className = "cover-title-main";
             mainEl.textContent = main;
             titleEl.appendChild(mainEl);
+
             if (sub) {
                 const subEl = document.createElement("div");
                 subEl.className = "cover-title-sub";
@@ -1385,7 +1428,6 @@
             }
 
             metaEl.textContent = "";
-
             img.alt = `${shortName} cover`;
             img.src = coverUrl;
 
@@ -1426,25 +1468,39 @@
         function populateTitleSelect() {
             const select = document.getElementById("titleSelect");
             if (!select || !currentDVD) return;
+            
             select.innerHTML = "";
             titleOrder.forEach(serverIdx => {
                 const t = currentDVD.titles[serverIdx];
                 const opt = document.createElement("option");
                 opt.value = serverIdx;
+
+                const prog = currentDVDProgress[serverIdx];
+                let symbol = ICON_UNWATCHED;
+                let extraInfo = "";
+
+                if (prog) {
+                    const ratio = prog.duration > 0 ? (prog.position / prog.duration) : 0;
+                    if (prog.watched || ratio >= 0.90) {
+                        symbol = ICON_WATCHED;
+                    } else if (prog.position > 10) {
+                        symbol = ICON_IN_PROGRESS;
+                        const pct = Math.round(ratio * 100);
+                        extraInfo = ` [${pct}% @ ${fmtTime(prog.position)}]`;
+                    }
+                }
+
                 const label = t.file.replace(/\.[^.]+$/, "");
-                opt.textContent = `${label}  (${fmtDuration(t.duration)})`;
+                opt.textContent = `${symbol}${label} (${fmtDuration(t.duration)})${extraInfo}`;
                 select.appendChild(opt);
             });
+
             select.value = String(currentTitleIdx);
         }
 
-        // ---------- Select a title ----------
-
         async function selectTitle(idx) {
             try {
-                const response = await fetch(`${API_URL}/dvd/title/${idx}`, {
-                    method: "POST"
-                });
+                const response = await fetch(`${API_URL}/dvd/title/${idx}`, { method: "POST" });
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({ error: "Unknown error" }));
                     showMessage(`Error: ${error.error}`, "error");
@@ -1458,7 +1514,6 @@
                 currentAudio = data.audio || [];
                 currentSubtitles = data.subtitles || [];
 
-                // Reset any image-based subtitle that belonged to the previous title
                 vobsubCues = null;
                 vobsubCurrentIdx = -1;
                 if (vobsubOverlay) vobsubOverlay.style.display = "none";
@@ -1469,19 +1524,28 @@
                 video.src = data.stream_url;
                 video.load();
 
+                const saved = currentDVDProgress[currentTitleIdx];
+                if (saved && saved.position > 10 && !saved.watched) {
+                    const restorePos = saved.position;
+                    const onMeta = () => {
+                        video.removeEventListener("loadedmetadata", onMeta);
+                        video.currentTime = restorePos;
+                        showMessage(`Resumed from ${fmtTime(restorePos)}`, "info");
+                    };
+                    video.addEventListener("loadedmetadata", onMeta);
+                }
+
                 const select = document.getElementById("titleSelect");
                 if (select) select.value = String(currentTitleIdx);
 
-                document.getElementById("menuTitle").textContent =
-                    `Chapters — ${data.file.replace(/\.[^.]+$/, "")}`;
+                document.getElementById("menuTitle").textContent = `Chapters — ${data.file.replace(/\.[^.]+$/, "")}`;
                 renderChapterButtons();
 
                 populateAudioSelect();
                 populateSubtitleSelect();
 
                 const statusDiv = document.getElementById("playingStatus");
-                statusDiv.textContent =
-                    `${chapters.length} chapter(s) · ${fmtDuration(data.duration)}`;
+                statusDiv.textContent = `${chapters.length} chapter(s) · ${fmtDuration(data.duration)}`;
 
                 updateCoverMeta();
             } catch (error) {
@@ -1490,11 +1554,9 @@
             }
         }
 
-        // ---------- Autoplay next ----------
-
         function onVideoEnded() {
+            saveProgress(true);
             if (cacheMode === "on_end" && currentDVD) {
-                console.log(`[Cache] Video ended - clearing cache for ${currentDVD.title}`);
                 clearCacheForDVD(currentDVD.title, true);
             }
 
@@ -1507,22 +1569,18 @@
                 return;
             }
             const nextIdx = titleOrder[pos + 1];
-            const nextName = currentDVD.titles[nextIdx].file.replace(/\.[^.]+$/, "");
-            showMessage(`Autoplay: ${nextName}`, "info");
-
             selectTitle(nextIdx).then(() => {
                 const video = document.getElementById("videoPlayer");
                 video.play().catch(err => console.warn("Autoplay blocked:", err));
             });
         }
 
-        // ---------- Audio dropdown ----------
-
         function populateAudioSelect() {
             const sel = document.getElementById("audioSelect");
             if (!sel) return;
             sel.innerHTML = "";
             loadedAudioIdx = 0;
+
             if (!currentAudio || currentAudio.length === 0) {
                 const opt = document.createElement("option");
                 opt.value = "0";
@@ -1536,10 +1594,7 @@
             currentAudio.forEach(t => {
                 const opt = document.createElement("option");
                 opt.value = String(t.index);
-                opt.textContent = t.title;
-                if (!t.playable) {
-                    opt.textContent += " (not browser-playable)";
-                }
+                opt.textContent = t.title + (t.playable ? "" : " (not browser-playable)");
                 sel.appendChild(opt);
             });
 
@@ -1549,12 +1604,10 @@
 
         function onVideoPlay() {
             isVideoPlaying = true;
-
             const sel = document.getElementById("audioSelect");
             if (sel) {
                 const chosen = parseInt(sel.value, 10) || 0;
                 if (chosen !== loadedAudioIdx) {
-                    console.log(`[Audio] Applying deferred track ${chosen} (loaded=${loadedAudioIdx}) on play`);
                     applyAudioTrack(chosen);
                 }
             }
@@ -1562,7 +1615,7 @@
 
         function onVideoPause() {
             isVideoPlaying = false;
-            console.log(`[Cache] Video paused`);
+            saveProgress(true);
         }
 
         let recoveringSrc = null;
@@ -1570,26 +1623,14 @@
         function onVideoError(e) {
             const video = document.getElementById("videoPlayer");
             if (!video || !video.error) return;
-
             const code = video.error.code;
-            const msg = video.error.message || "";
-            console.warn(`Video error (code ${code}): ${msg}`);
-
-            if (code !== MediaError.MEDIA_ERR_NETWORK &&
-                code !== MediaError.MEDIA_ERR_DECODE) {
-                return;
-            }
+            if (code !== MediaError.MEDIA_ERR_NETWORK && code !== MediaError.MEDIA_ERR_DECODE) return;
 
             const src = video.currentSrc || video.src;
-            if (recoveringSrc === src) {
-                console.warn("Already tried to recover this source; giving up");
-                showMessage("Playback failed. Click a chapter to try again.", "error");
-                return;
-            }
+            if (recoveringSrc === src) return;
             recoveringSrc = src;
 
             const resumeAt = video.currentTime || 0;
-
             setTimeout(() => {
                 if (recoveringSrc !== src) return;
                 video.load();
@@ -1602,27 +1643,8 @@
             }, 800);
         }
 
-        function triggerPrewarm() {
-            if (!currentDVD) return;
-            const idx = currentTitleIdx;
-            if (prewarmedTitles.has(idx)) return;
-            prewarmedTitles.add(idx);
-
-            fetch(`${API_URL}/dvd/prewarm/${idx}`, { method: "POST" })
-                .then(r => r.ok ? r.json() : null)
-                .then(data => {
-                    if (data && data.started) {
-                        console.log(`Pre-warming ${data.tracks} alternate audio track(s) for title ${idx}`);
-                    }
-                })
-                .catch(err => console.warn("Prewarm request failed:", err));
-        }
-
         function setAudioTrack(audioIdx) {
-            if (!isVideoPlaying) {
-                console.log(`[Audio] Track ${audioIdx} selected while paused — deferred until play`);
-                return;
-            }
+            if (!isVideoPlaying) return;
             applyAudioTrack(audioIdx);
         }
 
@@ -1637,22 +1659,8 @@
             const url = audioIdx === 0 ? base : `${base}?audio=${audioIdx}`;
 
             if (audioIdx > 0) {
-                console.log(`[Cache] POST /api/dvd/cache-track/${currentTitleIdx}/${audioIdx}`);
-                fetch(`${API_URL}/dvd/cache-track/${currentTitleIdx}/${audioIdx}`, { method: "POST" })
-                    .then(async r => {
-                        const body = await r.text();
-                        console.log(`[Cache] cache-track HTTP ${r.status} body=${body}`);
-                        return body ? JSON.parse(body) : null;
-                    })
-                    .then(data => {
-                        if (data && data.started) {
-                            console.log(`[Cache] Background caching audio track ${audioIdx} started`);
-                        } else {
-                            console.warn(`[Cache] cache-track did NOT start:`, data);
-                        }
-                    })
-                    .catch(err => console.error(`[Cache] cache-track failed:`, err));
-                showMessage("Switching audio — first play of this track may take a moment while it remuxes…", "info");
+                fetch(`${API_URL}/dvd/cache-track/${currentTitleIdx}/${audioIdx}`, { method: "POST" });
+                showMessage("Switching audio track…", "info");
             }
 
             recoveringSrc = null;
@@ -1663,17 +1671,10 @@
                 video.removeEventListener("loadedmetadata", restore);
                 if (pos > 0) video.currentTime = pos;
                 if (wasPlaying) video.play().catch(() => {});
-                const subSel = document.getElementById("subtitleSelect");
-                if (subSel && subSel.value && subSel.value !== "off") {
-                    setSubtitle(subSel.value);
-                }
             };
             video.addEventListener("loadedmetadata", restore);
-
             loadedAudioIdx = audioIdx;
         }
-
-        // ---------- Subtitle dropdown ----------
 
         function populateSubtitleSelect() {
             const sel = document.getElementById("subtitleSelect");
@@ -1688,8 +1689,6 @@
             if (!currentSubtitles || currentSubtitles.length === 0) {
                 off.textContent = "Off (no subs)";
                 sel.disabled = true;
-                const video = document.getElementById("videoPlayer");
-                if (video) video.querySelectorAll("track").forEach(t => t.remove());
                 return;
             }
 
@@ -1698,7 +1697,6 @@
                 const opt = document.createElement("option");
                 opt.value = t.id;
                 opt.textContent = t.title + (t.playable ? "" : " (not playable)");
-                if (!t.playable) opt.title = t.note || "Bitmap subtitle";
                 sel.appendChild(opt);
             });
 
@@ -1707,11 +1705,9 @@
         }
 
         let subtitleBlobUrl = null;
-
-        // ---------- VobSub (image-based) subtitle renderer ----------
-        let vobsubCues = null;       // [{start, end, src}, ...] sorted by start
-        let vobsubOverlay = null;    // The positioned <div> overlay in the player
-        let vobsubCurrentIdx = -1;   // Index of displayed cue, -1 = none
+        let vobsubCues = null;
+        let vobsubOverlay = null;
+        let vobsubCurrentIdx = -1;
         let vobsubImageLoadingUrl = null;
 
         function parseImageVtt(text) {
@@ -1728,9 +1724,7 @@
                 if (!/-->/.test(lines[0])) i = 1;
                 if (i >= lines.length) continue;
 
-                const m = lines[i].match(
-                    /(\d+):(\d+):(\d+)[.,](\d+)\s*-->\s*(\d+):(\d+):(\d+)[.,](\d+)/
-                );
+                const m = lines[i].match(/(\d+):(\d+):(\d+)[.,](\d+)\s*-->\s*(\d+):(\d+):(\d+)[.,](\d+)/);
                 if (!m) continue;
 
                 const start = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 1000;
@@ -1768,17 +1762,14 @@
             if (m) raw = m[1];
             raw = raw.trim();
 
-            const serverRoute = raw.match(
-                /^\/api\/dvd\/(?:vobsub|subtitle)-image\/\d+\/(.+)$/
-            );
+            const serverRoute = raw.match(/^\/api\/dvd\/(?:vobsub|subtitle)-image\/\d+\/(.+)$/);
             if (serverRoute) {
-                return `${API_URL}/dvd/vobsub-image/${currentTitleIdx}/${serverRoute[1]}`;
+                return `${API_URL}/dvd/subtitle-image/${currentTitleIdx}/${serverRoute[1]}`;
             }
 
             if (/^https?:\/\//i.test(raw)) return raw;
-
             raw = raw.replace(/^\.\//, "").replace(/^\/+/, "");
-            return `${API_URL}/dvd/vobsub-image/${currentTitleIdx}/${encodePath(raw)}`;
+            return `${API_URL}/dvd/subtitle-image/${currentTitleIdx}/${encodePath(raw)}`;
         }
 
         function getVideoRenderArea(video) {
@@ -1788,7 +1779,7 @@
             const containerH = video.clientHeight || 0;
 
             if (!containerW || !containerH) {
-                return { renderW: containerW, renderH: containerH, scaleX: 1, scaleY: 1, left: 0, bottom: 0 };
+                return { renderW: containerW, renderH: containerH, scaleX: 1, scaleY: 1 };
             }
 
             const videoAspect = videoW / videoH;
@@ -1803,12 +1794,7 @@
                 renderH = renderW / videoAspect;
             }
 
-            const scaleX = renderW / videoW;
-            const scaleY = renderH / videoH;
-            const left = (containerW - renderW) / 2;
-            const bottom = (containerH - renderH) / 2;
-
-            return { renderW, renderH, scaleX, scaleY, left, bottom };
+            return { renderW, renderH, scaleX: renderW / videoW, scaleY: renderH / videoH };
         }
 
         function applyVobsubScale(overlay, video) {
@@ -1816,15 +1802,10 @@
             if (!img || !img.naturalWidth || !img.naturalHeight) return;
 
             const area = getVideoRenderArea(video);
-
-            // Add a multiplier (e.g., 0.8 for 80% size, 0.7 for 70%)
             const SUBTITLE_SCALE = 0.7;
 
-            const scaledWidth = Math.round(img.naturalWidth * area.scaleX * SUBTITLE_SCALE);
-            const scaledHeight = Math.round(img.naturalHeight * area.scaleY * SUBTITLE_SCALE);
-
-            img.style.width = scaledWidth + "px";
-            img.style.height = scaledHeight + "px";
+            img.style.width = Math.round(img.naturalWidth * area.scaleX * SUBTITLE_SCALE) + "px";
+            img.style.height = Math.round(img.naturalHeight * area.scaleY * SUBTITLE_SCALE) + "px";
             overlay.style.bottom = "8px";
         }
 
@@ -1857,18 +1838,12 @@
 
             if (vobsubImageLoadingUrl !== url) {
                 vobsubImageLoadingUrl = url;
-
                 const tempImg = new Image();
                 tempImg.onload = () => {
                     if (vobsubImageLoadingUrl === url) {
                         img.src = url;
                         applyVobsubScale(vobsubOverlay, video);
                         vobsubOverlay.style.display = "block";
-                    }
-                };
-                tempImg.onerror = () => {
-                    if (vobsubImageLoadingUrl === url) {
-                        vobsubOverlay.style.display = "none";
                     }
                 };
                 tempImg.src = url;
@@ -1882,25 +1857,15 @@
             const url = `${API_URL}/dvd/subtitle/${currentTitleIdx}/${encodeURIComponent(track.id)}`;
             try {
                 const response = await fetch(url);
-                if (!response.ok) {
-                    showMessage(`Subtitle failed: HTTP ${response.status}`, "error");
-                    return;
-                }
+                if (!response.ok) return;
                 const text = await response.text();
                 const cues = parseImageVtt(text);
-                if (cues.length === 0) {
-                    showMessage("Image subtitle contained no usable cues.", "error");
-                    return;
-                }
+                if (cues.length === 0) return;
                 vobsubCues = cues;
                 vobsubCurrentIdx = -1;
                 vobsubOverlay = ensureVobsubOverlay();
                 updateVobsubOverlay();
-                console.log(`[VobSub] Loaded ${cues.length} image cue(s)`);
-            } catch (e) {
-                console.error("VobSub load failed:", e);
-                showMessage(`Subtitle load failed: ${e.message}`, "error");
-            }
+            } catch (e) { }
         }
 
         function clearVobsubOverlay() {
@@ -1908,40 +1873,26 @@
             vobsubCurrentIdx = -1;
             vobsubImageLoadingUrl = null;
             const stray = document.querySelector(".vobsub-overlay");
-            if (stray) {
-                stray.style.display = "none";
-                const img = stray.querySelector("img");
-                if (img) {
-                    img.removeAttribute("src");
-                    img.removeAttribute("data-src");
-                    img.style.width = "";
-                    img.style.height = "";
-                }
-            }
+            if (stray) stray.style.display = "none";
         }
 
         async function setSubtitle(trackId) {
             const video = document.getElementById("videoPlayer");
             if (!video) return;
 
-            // Clear text tracks
             video.querySelectorAll("track").forEach(t => t.remove());
             if (subtitleBlobUrl) {
                 URL.revokeObjectURL(subtitleBlobUrl);
                 subtitleBlobUrl = null;
             }
 
-            // Clear image overlay
             clearVobsubOverlay();
-
             if (!trackId || trackId === "off") return;
 
             const track = currentSubtitles.find(t => t.id === trackId);
             if (!track) return;
 
-            // png-webvtt output: image-based cues, need the custom renderer.
-            const isImageBased =
-                track.source === "external" &&
+            const isImageBased = track.source === "external" &&
                 typeof track.filename === "string" &&
                 track.filename.toLowerCase().includes(".vobsub.vtt");
 
@@ -1950,35 +1901,13 @@
                 return;
             }
 
-            // ---- Existing text-subtitle path ----
-            if (!track.playable) {
-                showMessage(track.note || "This subtitle can't be shown in the browser.", "error");
-                return;
-            }
+            if (!track.playable) return;
 
             const url = `${API_URL}/dvd/subtitle/${currentTitleIdx}/${encodeURIComponent(track.id)}`;
-
             try {
                 const response = await fetch(url);
-
-                if (!response.ok) {
-                    let detail = `HTTP ${response.status}`;
-                    try {
-                        const j = await response.json();
-                        if (j.error) detail = j.error;
-                    } catch (e) { }
-                    showMessage(`Subtitle failed: ${detail}`, "error");
-                    return;
-                }
-
+                if (!response.ok) return;
                 const text = await response.text();
-
-                const firstLine = text.replace(/^\uFEFF/, "").split("\n", 1)[0].trim();
-                if (!firstLine.startsWith("WEBVTT")) {
-                    showMessage(`Server returned non-VTT data (starts with "${firstLine.slice(0, 20)}...")`, "error");
-                    return;
-                }
-
                 const clean = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
                 const blob = new Blob([clean], { type: "text/vtt" });
                 subtitleBlobUrl = URL.createObjectURL(blob);
@@ -1995,33 +1924,16 @@
                         video.textTracks[i].mode = "showing";
                     }
                 });
-
-                trackEl.addEventListener("error", () => {
-                    showMessage(`Subtitle "${track.title}" failed to parse`, "error");
-                });
-
                 video.appendChild(trackEl);
-
-                setTimeout(() => {
-                    for (let i = 0; i < video.textTracks.length; i++) {
-                        video.textTracks[i].mode = "showing";
-                    }
-                }, 100);
-            } catch (err) {
-                console.error("Subtitle fetch failed:", err);
-                showMessage(`Subtitle fetch failed: ${err.message}`, "error");
-            }
+            } catch (err) { }
         }
-
-        // ---------- Chapter list ----------
 
         function renderChapterButtons() {
             const menuButtonsDiv = document.getElementById("menuButtons");
             menuButtonsDiv.innerHTML = "";
 
             if (!chapters || chapters.length === 0) {
-                menuButtonsDiv.innerHTML =
-                    "<div class='status'>No chapters found in this title.</div>";
+                menuButtonsDiv.innerHTML = "<div class='status'>No chapters found.</div>";
                 return;
             }
 
@@ -2086,8 +1998,6 @@
             if (idx !== activeChapterIdx) highlightChapter(idx);
         }
 
-        // ---------- Cache ----------
-
         function unloadVideo() {
             const video = document.getElementById("videoPlayer");
             if (!video) return;
@@ -2103,17 +2013,10 @@
             if (!list) return;
             try {
                 const response = await fetch(`${API_URL}/dvd/cache/info`);
-                if (!response.ok) {
-                    console.warn("Cache info HTTP", response.status);
-                    list.innerHTML = `<div class='cache-empty'>Server returned ${response.status}</div>`;
-                    return;
-                }
+                if (!response.ok) return;
                 const data = await response.json();
                 renderCacheList(data);
-            } catch (error) {
-                console.error("Cache info failed:", error);
-                list.innerHTML = "<div class='cache-empty'>Could not reach server</div>";
-            }
+            } catch (error) { }
         }
 
         function renderCacheList(data) {
@@ -2126,7 +2029,6 @@
             }
 
             list.innerHTML = "";
-
             const total = document.createElement("div");
             total.className = "cache-total";
             total.textContent = `Total: ${fmtBytes(data.total_bytes)} · ${data.total_files} file${data.total_files === 1 ? "" : "s"}`;
@@ -2138,9 +2040,7 @@
 
                 const name = document.createElement("span");
                 name.className = "cache-name";
-                const short = dvd.name.split("/").pop() || dvd.name;
-                name.textContent = short;
-                name.title = `${dvd.name}\n${dvd.files} file(s)\n${fmtBytes(dvd.bytes)} total`;
+                name.textContent = dvd.name.split("/").pop() || dvd.name;
 
                 const size = document.createElement("span");
                 size.className = "cache-size";
@@ -2162,81 +2062,28 @@
         }
 
         async function clearCacheForDVD(dvdName, silent = false) {
-            if (!silent && !confirm(`Clear cached files for "${dvdName}"?\n\nYour MKV files are not affected.`)) {
-                return;
-            }
+            if (!silent && !confirm(`Clear cached files for "${dvdName}"?`)) return;
 
             if (!silent) unloadVideo();
             await new Promise(r => setTimeout(r, 100));
 
             try {
-                const response = await fetch(
-                    `${API_URL}/dvd/cache/clear?dvd=${encodeURIComponent(dvdName)}`,
-                    { method: "POST" }
-                );
-                const data = await response.json();
-
-                if (response.status === 409) {
-                    showMessage(`${data.error}. Stop playback and try again.`, "error");
-                } else if (!response.ok) {
-                    showMessage(`Error: ${data.error || "Unknown error"}`, "error");
-                } else if (data.locked && data.locked.length > 0) {
-                    showMessage(
-                        `Cleared ${data.removed} file(s), ${data.locked.length} still locked`,
-                        "info"
-                    );
-                } else {
-                    showMessage(
-                        `Cleared ${data.removed} file(s) for "${dvdName}", freed ${data.mb_freed} MB`,
-                        "success"
-                    );
-                }
-
+                const response = await fetch(`${API_URL}/dvd/cache/clear?dvd=${encodeURIComponent(dvdName)}`, { method: "POST" });
                 loadCacheInfo();
-            } catch (error) {
-                console.error("Clear failed:", error);
-                showMessage("Failed to clear cache", "error");
-            }
+            } catch (error) { }
         }
 
         async function clearAllCache() {
-            if (!confirm("Clear cached files for ALL DVDs?\n\nYour MKV files are not affected.")) {
-                return;
-            }
+            if (!confirm("Clear cached files for ALL DVDs?")) return;
 
             unloadVideo();
             await new Promise(r => setTimeout(r, 400));
 
-            const btn = document.getElementById("clearAllCacheBtn");
-            btn.disabled = true;
-            btn.textContent = "Clearing...";
-
             try {
-                const response = await fetch(`${API_URL}/dvd/cache/clear`, { method: "POST" });
-                const data = await response.json();
-
-                if (response.status === 409) {
-                    showMessage(`${data.error}. Stop playback and try again.`, "error");
-                } else if (!response.ok) {
-                    showMessage(`Error: ${data.error || "Unknown error"}`, "error");
-                } else {
-                    showMessage(
-                        `Cleared ${data.removed} file(s) across all DVDs, freed ${data.mb_freed} MB`,
-                        "success"
-                    );
-                }
-
+                await fetch(`${API_URL}/dvd/cache/clear`, { method: "POST" });
                 loadCacheInfo();
-            } catch (error) {
-                console.error("Clear all failed:", error);
-                showMessage("Failed to clear cache", "error");
-            } finally {
-                btn.disabled = false;
-                btn.textContent = "Clear All";
-            }
+            } catch (error) { }
         }
-
-        // ---------- Messages / status ----------
 
         function showMessage(text, type = "info") {
             const messageArea = document.getElementById("messageArea");
@@ -2249,8 +2096,6 @@
         function updateConnectionStatus(status) {
             document.getElementById("connectionStatus").textContent = `Server: ${status}`;
         }
-
-        // ---------- Custom Video Controls ----------
 
         function setupCustomControls() {
             const video = document.getElementById("videoPlayer");
@@ -2266,41 +2111,10 @@
             const fullscreenBtn = document.getElementById("fullscreenBtn");
             if (!video || !player) return;
 
-            // Grab the overlay element that renderPlayer injected.
             vobsubOverlay = ensureVobsubOverlay();
 
-            // Re-scale the VobSub overlay whenever the player box changes
-            // size — window resize, fullscreen toggle, dim-mode, etc.
-            if (typeof ResizeObserver === "function") {
-                const vobsubResizeObserver = new ResizeObserver(() => {
-                    if (vobsubOverlay && vobsubOverlay.style.display !== "none") {
-                        applyVobsubScale(vobsubOverlay, video);
-                    }
-                });
-                vobsubResizeObserver.observe(video);
-            } else {
-                const rescale = () => {
-                    if (vobsubOverlay && vobsubOverlay.style.display !== "none") {
-                        applyVobsubScale(vobsubOverlay, video);
-                    }
-                };
-                window.addEventListener("resize", rescale);
-                document.addEventListener("fullscreenchange", rescale);
-            }
-
-            const ICON_PLAY = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
-            const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z" fill="currentColor"/></svg>';
-            const ICON_VOL_HIGH = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" fill="currentColor"/></svg>';
-            const ICON_VOL_LOW = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z" fill="currentColor"/></svg>';
-            const ICON_VOL_MUTE = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" fill="currentColor"/></svg>';
-            const ICON_FS = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/></svg>';
-            const ICON_FS_EXIT = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" fill="currentColor"/></svg>';
-
             function togglePlay() {
-                if (coverVisible) {
-                    startPlayback();
-                    return;
-                }
+                if (coverVisible) { startPlayback(); return; }
                 if (video.paused || video.ended) video.play().catch(() => {});
                 else video.pause();
             }
@@ -2308,82 +2122,43 @@
             playPauseBtn.onclick = (e) => { e.stopPropagation(); togglePlay(); };
 
             video.addEventListener("play", () => {
-                playPauseBtn.innerHTML = ICON_PAUSE;
-                scheduleHide();
+                playPauseBtn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M6 5h4v14H6zM14 5h4v14h-4z" fill="currentColor"/></svg>';
             });
             video.addEventListener("pause", () => {
-                playPauseBtn.innerHTML = ICON_PLAY;
-                showControls();
-            });
-            video.addEventListener("ended", () => {
-                playPauseBtn.innerHTML = ICON_PLAY;
-                showControls();
+                playPauseBtn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
             });
 
             video.addEventListener("click", (e) => {
-                if (e.target.closest(".player-controls")) return;
-                if (coverVisible) return;
+                if (e.target.closest(".player-controls") || coverVisible) return;
                 togglePlay();
             });
-
-            function fmtPlayerTime(sec) {
-                if (!isFinite(sec) || sec < 0) return "0:00";
-                sec = Math.floor(sec);
-                const h = Math.floor(sec / 3600);
-                const m = Math.floor((sec % 3600) / 60);
-                const s = sec % 60;
-                if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-                return `${m}:${String(s).padStart(2, "0")}`;
-            }
 
             function updateProgress() {
                 const dur = video.duration;
                 if (!dur || !isFinite(dur)) {
-                    timeDisplay.textContent = `${fmtPlayerTime(video.currentTime)} / 0:00`;
+                    timeDisplay.textContent = `${fmtTime(video.currentTime)} / 0:00`;
                     return;
                 }
                 const pct = Math.max(0, Math.min(100, (video.currentTime / dur) * 100));
                 playedBar.style.width = pct + "%";
                 progressKnob.style.left = pct + "%";
-                timeDisplay.textContent = `${fmtPlayerTime(video.currentTime)} / ${fmtPlayerTime(dur)}`;
+                timeDisplay.textContent = `${fmtTime(video.currentTime)} / ${fmtTime(dur)}`;
             }
 
-            // Single listener per event; progress + VobSub overlay both
-            // update on the same tick.
             video.addEventListener("timeupdate", () => {
                 updateProgress();
                 updateVobsubOverlay();
+                saveProgress(false);
             });
             video.addEventListener("seeked", () => {
                 updateProgress();
                 updateVobsubOverlay();
             });
-            video.addEventListener("durationchange", updateProgress);
-            video.addEventListener("loadedmetadata", () => {
-                updateProgress();
-                vobsubCurrentIdx = -1;
-                updateVobsubOverlay();
-            });
-
-            video.addEventListener("progress", () => {
-                const dur = video.duration;
-                if (!dur || !video.buffered.length) return;
-                let end = 0;
-                for (let i = 0; i < video.buffered.length; i++) {
-                    if (video.buffered.start(i) <= video.currentTime &&
-                        video.currentTime <= video.buffered.end(i)) {
-                        end = video.buffered.end(i);
-                        break;
-                    }
-                }
-                bufferedBar.style.width = ((end / dur) * 100) + "%";
-            });
 
             let seeking = false;
             function seekFromEvent(e) {
                 const rect = progressBar.getBoundingClientRect();
-                let pct = (e.clientX - rect.left) / rect.width;
-                pct = Math.max(0, Math.min(1, pct));
+                let pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
                 if (video.duration && isFinite(video.duration)) {
                     video.currentTime = pct * video.duration;
                     updateProgress();
@@ -2395,145 +2170,30 @@
                 seeking = true;
                 progressBar.setPointerCapture(e.pointerId);
                 seekFromEvent(e);
-                e.preventDefault();
             });
-            progressBar.addEventListener("pointermove", (e) => {
-                if (seeking) seekFromEvent(e);
-            });
-            progressBar.addEventListener("pointerup", (e) => {
-                seeking = false;
-                try { progressBar.releasePointerCapture(e.pointerId); } catch (err) {}
-            });
-            progressBar.addEventListener("pointercancel", () => { seeking = false; });
-
-            function updateMuteIcon() {
-                if (video.muted || video.volume === 0) muteBtn.innerHTML = ICON_VOL_MUTE;
-                else if (video.volume < 0.5) muteBtn.innerHTML = ICON_VOL_LOW;
-                else muteBtn.innerHTML = ICON_VOL_HIGH;
-            }
+            progressBar.addEventListener("pointermove", (e) => { if (seeking) seekFromEvent(e); });
+            progressBar.addEventListener("pointerup", (e) => { seeking = false; });
 
             muteBtn.onclick = (e) => {
                 e.stopPropagation();
                 video.muted = !video.muted;
-                updateMuteIcon();
             };
 
             volumeSlider.oninput = () => {
                 video.volume = parseFloat(volumeSlider.value);
                 video.muted = video.volume === 0;
-                updateMuteIcon();
             };
-            video.addEventListener("volumechange", () => {
-                volumeSlider.value = String(video.muted ? 0 : video.volume);
-                updateMuteIcon();
-            });
 
             fullscreenBtn.onclick = (e) => {
                 e.stopPropagation();
-                if (document.fullscreenElement) {
-                    document.exitFullscreen();
-                } else if (player.requestFullscreen) {
-                    player.requestFullscreen();
-                } else if (video.webkitRequestFullscreen) {
-                    video.webkitRequestFullscreen();
-                }
+                if (document.fullscreenElement) document.exitFullscreen();
+                else player.requestFullscreen();
             };
-
-            document.addEventListener("fullscreenchange", () => {
-                fullscreenBtn.innerHTML = document.fullscreenElement ? ICON_FS_EXIT : ICON_FS;
-            });
-
-            let hideTimer = null;
-            function showControls() {
-                player.classList.remove("controls-hidden");
-                if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-            }
-            function scheduleHide() {
-                if (hideTimer) clearTimeout(hideTimer);
-                if (video.paused || video.ended) return;
-                hideTimer = setTimeout(() => {
-                    player.classList.add("controls-hidden");
-                }, 3000);
-            }
-
-            player.addEventListener("mousemove", () => { showControls(); scheduleHide(); });
-            player.addEventListener("mouseleave", () => {
-                if (!video.paused) player.classList.add("controls-hidden");
-            });
-            player.addEventListener("mouseenter", showControls);
-
-            document.addEventListener("keydown", (e) => {
-                const tag = (document.activeElement && document.activeElement.tagName) || "";
-                if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
-
-                if (!document.getElementById("videoPlayer")) return;
-
-                switch (e.key) {
-                    case " ":
-                    case "k":
-                        togglePlay();
-                        e.preventDefault();
-                        break;
-                    case "ArrowLeft":
-                        if (coverVisible) return;
-                        video.currentTime = Math.max(0, video.currentTime - 10);
-                        e.preventDefault();
-                        break;
-                    case "ArrowRight":
-                        if (coverVisible) return;
-                        video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
-                        e.preventDefault();
-                        break;
-                    case "ArrowUp":
-                        video.volume = Math.min(1, video.volume + 0.1);
-                        video.muted = false;
-                        e.preventDefault();
-                        break;
-                    case "ArrowDown":
-                        video.volume = Math.max(0, video.volume - 0.1);
-                        e.preventDefault();
-                        break;
-                    case "m":
-                        video.muted = !video.muted;
-                        e.preventDefault();
-                        break;
-                    case "f":
-                        if (document.fullscreenElement) document.exitFullscreen();
-                        else player.requestFullscreen && player.requestFullscreen();
-                        e.preventDefault();
-                        break;
-                }
-            });
-
-            updateMuteIcon();
-            updateProgress();
         }
 
-        // ---------- Init ----------
-
         window.addEventListener("load", () => {
-            // Sanity check: every function the app depends on must exist.
-            const required = [
-                "loadDVDList","toggleGenre","loadDVD","computeTitleOrder",
-                "renderPlayer","setupCoverOverlay","selectTitle",
-                "populateTitleSelect","populateAudioSelect","populateSubtitleSelect",
-                "setupCustomControls","updateVobsubOverlay","loadVobsubSubtitle",
-                "applyVobsubScale","parseImageVtt"
-            ];
-            const missing = required.filter(n => typeof window[n] !== "function");
-            if (missing.length) {
-                console.error("MISSING FUNCTIONS:", missing);
-                document.getElementById("connectionStatus").textContent =
-                    "Broken build — check console";
-                return;
-            }
-
             let themes = discoverThemes();
-            console.log(`Discovered ${themes.length} themes:`,
-                        themes.map(t => `${t.id} (${t.label})`));
-
             if (themes.length === 0) {
-                console.warn("Theme discovery returned nothing; using fallback list");
                 themes = [
                     { id: "terminal", label: "Terminal" },
                     { id: "midnight", label: "Midnight" },
@@ -2549,12 +2209,6 @@
                 opt.textContent = t.label;
                 themeEl.appendChild(opt);
             });
-
-            const available = themes.map(t => t.id);
-            if (!available.includes(themeName)) {
-                themeName = available[0];
-                try { localStorage.setItem("theme", themeName); } catch (e) {}
-            }
 
             themeEl.value = themeName;
             applyTheme(themeName);
@@ -2574,15 +2228,7 @@
                 applyDim(dimmed);
             };
 
-            document.querySelectorAll('input[name="cacheMode"]').forEach(radio => {
-                radio.checked = (radio.value === cacheMode);
-                radio.onchange = (e) => {
-                    cacheMode = e.target.value;
-                    try { localStorage.setItem("cacheMode", cacheMode); } catch (err) {}
-                    console.log(`[Cache] Auto-clear mode set to: ${cacheMode}`);
-                };
-            });
-
+            loadUsers();
             loadDVDList();
             setInterval(loadDVDList, 15000);
 

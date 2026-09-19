@@ -1,21 +1,7 @@
 """
-DVD Server - Backend (MKV version)
-Streams MKV files ripped from DVDs with chapter data, subtitle selection, and audio track selection.
-
-Supports nested library layout:
-    dvds/<Genre>/<DVD Folder>/*.mkv
-    dvds/<DVD Folder>/*.mkv          (no genre -> "Uncategorized")
-    dvds/<Genre>/<Sub>/<DVD>/*.mkv   (deeper nesting also works)
-
-Also supports PNG+WebVTT image-cue subtitles produced by ripper.py's
---backend png-webvtt mode:
-    <stem>.<lang>[.t<id>].vobsub.vtt          (WebVTT, cues point to PNGs)
-    <stem>.<lang>[.t<id>].vobsub.images/*.png (one PNG per cue)
-
-Image-based VTTs are served with their relative PNG paths rewritten to
-absolute API URLs so the browser can resolve them regardless of the VTT
-response's own URL. A dedicated /api/dvd/subtitle-image/... route serves
-the individual PNGs, sandboxed to the title's own folder.
+DVD Server - Backend (Hardened MKV version)
+Streams MKV files ripped from DVDs with chapter data, subtitle selection, audio track selection,
+user profiles, watch progress tracking, and secure sandboxed path resolving.
 """
 
 from flask import Flask, jsonify, send_file, Response, request
@@ -26,45 +12,31 @@ import json
 import shutil
 import threading
 import subprocess
+import sqlite3
 from pathlib import Path
 from urllib.parse import quote
 import logging
 
 app = Flask(__name__)
-CORS(app)
 
-# Resolve every file path relative to this script, not the CWD
+# Security: Cap request payload size to 1 MB
+app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
+
+# Security: CORS restricted to local network and localhost origins
+CORS(app, resources={r"/api/*": {"origins": [
+    r"http://localhost:\d+",
+    r"http://127\.0\.0\.1:\d+",
+    r"http://192\.168\.\d+\.\d+:\d+",
+    r"http://10\.\d+\.\d+\.\d+:\d+",
+]}})
+
+# Resolve path relative to this script
 BASE_DIR = Path(__file__).parent.resolve()
-
-# ---------- Logging ----------
-_ACCESS_LINE_RE = re.compile(r'"\S+\s+\S+\s+HTTP/[\d.]+"\s+(\d{3})')
-
-
-class _AccessLogFilter(logging.Filter):
-    def filter(self, record):
-        if record.name != "werkzeug":
-            return True
-        m = _ACCESS_LINE_RE.search(record.getMessage())
-        if m:
-            code = int(m.group(1))
-            if 200 <= code < 300 or code == 304:
-                return False
-        return True
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)-5s] %(message)s",
-    datefmt="%H:%M:%S",
-)
-logging.getLogger("werkzeug").addFilter(_AccessLogFilter())
-
-log = logging.getLogger("dvdserver")
-
-
-# ---------- Configuration ----------
-DVD_FOLDER = BASE_DIR / "../dvds"
+DVD_FOLDER = (BASE_DIR / "../dvds").resolve()
+DB_PATH = BASE_DIR / "user_data.db"
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".webm", ".vob"}
+
+USERNAME_RE = re.compile(r"^[a-zA-Z0-9_\- ]{1,32}$")
 
 FFPROBE_CANDIDATES = [
     "ffprobe",
@@ -82,83 +54,121 @@ EXTRA_SEARCH_ROOTS = [r"D:\programs", r"C:\Program Files", r"C:\Program Files (x
 
 TEXT_SUB_CODECS = {"subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text"}
 BROWSER_AUDIO_CODECS = {"aac", "mp3", "opus", "vorbis", "flac"}
-# Minimum valid cache file size (bytes) - helps detect corrupted/incomplete files
 MIN_CACHE_FILE_SIZE = 1024 * 1024  # 1 MB
 
-# Folder names we never descend into during a library scan
 SKIP_DIR_NAMES = {
     ".remux", ".subtitles", ".subtitle_work",
     ".git", ".svn", "__pycache__", "node_modules",
     "$RECYCLE.BIN", "System Volume Information",
 }
 
-# How deep the scanner will walk.  dvds/Genre/DVD  = depth 2
 MAX_SCAN_DEPTH = 6
 
-# Windows reserved device names - never allow these as a path component
 _WINDOWS_RESERVED = {
     "CON", "PRN", "AUX", "NUL",
     *(f"COM{i}" for i in range(1, 10)),
     *(f"LPT{i}" for i in range(1, 10)),
 }
-# -----------------------------------
+
+# ---------- Logging ----------
+_ACCESS_LINE_RE = re.compile(r'"\S+\s+\S+\s+HTTP/[\d.]+"\s+(\d{3})')
+
+class _AccessLogFilter(logging.Filter):
+    def filter(self, record):
+        if record.name != "werkzeug":
+            return True
+        m = _ACCESS_LINE_RE.search(record.getMessage())
+        if m:
+            code = int(m.group(1))
+            if 200 <= code < 300 or code == 304:
+                return False
+        return True
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-5s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logging.getLogger("werkzeug").addFilter(_AccessLogFilter())
+log = logging.getLogger("dvdserver")
+
+
+# ---------- Database Initialization ----------
+
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        # Dedicated profiles table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Progress tracking table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_progress (
+                username TEXT NOT NULL,
+                dvd_name TEXT NOT NULL,
+                title_idx INTEGER NOT NULL,
+                position REAL NOT NULL,
+                duration REAL NOT NULL,
+                watched INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (username, dvd_name, title_idx)
+            )
+        """)
+init_db()
+
 
 def _client_ip():
-    """Real client IP, honouring X-Forwarded-For when behind a proxy."""
     xff = request.headers.get("X-Forwarded-For", "")
     if xff:
         return xff.split(",")[0].strip()
     return request.remote_addr or "unknown"
 
 
-# ---------- Path safety ----------
+# ---------- Path Safety & Validation ----------
+
+def _sanitize_username(name: str) -> str:
+    if not name or not isinstance(name, str):
+        return "Guest"
+    cleaned = name.strip()
+    if not USERNAME_RE.match(cleaned):
+        return "Guest"
+    return cleaned
+
 
 def _is_safe_path_component(part: str) -> bool:
-    """A single path segment. Rejects traversal, drive letters, ADS, reserved names."""
     if not part or part in (".", ".."):
         return False
-    if "\x00" in part or ":" in part:
+    if "\x00" in part or ":" in part or "\\" in part:
         return False
-    # Windows reserved device names (CON, PRN, ..., COM1, LPT1, ...)
     if part.split(".")[0].upper() in _WINDOWS_RESERVED:
         return False
     return True
 
 
-def _safe_dvd_path(rel_name: str):
-    """
-    Resolve a client-supplied relative DVD name against DVD_FOLDER.
-    Returns an absolute Path only if it stays strictly inside DVD_FOLDER.
-    Returns None on ANY suspicious input (traversal, absolute path, symlink escape).
-    """
+def _safe_dvd_path(rel_name: str, base_dir: Path = DVD_FOLDER) -> Path | None:
     if not rel_name or not isinstance(rel_name, str):
         return None
 
-    # Normalize backslashes so a Windows-style input can't smuggle a "..".
-    rel_name = rel_name.replace("\\", "/").strip("/")
-    if not rel_name:
+    normalized = rel_name.replace("\\", "/").strip("/")
+    if not normalized:
         return None
 
-    parts = rel_name.split("/")
+    parts = normalized.split("/")
     if any(not _is_safe_path_component(p) for p in parts):
         log.warning(f"Rejected unsafe path component: {rel_name!r}")
         return None
 
-    root = DVD_FOLDER.resolve()
+    root = base_dir.resolve()
     try:
-        candidate = (root / rel_name).resolve()
-    except (OSError, RuntimeError) as e:
-        log.warning(f"Path resolve failed for {rel_name!r}: {e}")
-        return None
-
-    # Final gate: candidate must still be inside root (this catches symlink escapes).
-    try:
+        candidate = (root / normalized).resolve()
         candidate.relative_to(root)
-    except ValueError:
-        log.warning(f"Path escapes DVD_FOLDER: {rel_name!r} -> {candidate}")
+        return candidate
+    except (OSError, RuntimeError, ValueError) as e:
+        log.warning(f"Path safety check failed for {rel_name!r}: {e}")
         return None
-
-    return candidate
 
 
 # ---------- Cache validation helpers ----------
@@ -237,8 +247,7 @@ def _get_cache_lock(cache_file: Path) -> threading.Lock:
         return _cache_locks[key]
 
 
-def _remux_to_cache(path: Path, cache_file: Path, audio_idx: int,
-                    passthrough: bool) -> bool:
+def _remux_to_cache(path: Path, cache_file: Path, audio_idx: int, passthrough: bool) -> bool:
     if _is_cache_valid(cache_file):
         return True
     if cache_file.exists():
@@ -255,11 +264,11 @@ def _remux_to_cache(path: Path, cache_file: Path, audio_idx: int,
     try:
         subprocess.run(cmd, capture_output=True, timeout=900)
     except subprocess.TimeoutExpired:
-        log.warning(f"  Remux timed out: {cache_file.name}")
+        log.warning(f"Remux timed out: {cache_file.name}")
         _delete_cache_file(cache_file)
         return False
     except Exception as e:
-        log.warning(f"  Remux failed: {e}")
+        log.warning(f"Remux failed: {e}")
         _delete_cache_file(cache_file)
         return False
 
@@ -270,7 +279,6 @@ def _remux_to_cache(path: Path, cache_file: Path, audio_idx: int,
 
 
 def _cache_one_track(title, title_idx, audio_idx):
-    """Background: remux a single alternate audio track. Serialized per file."""
     if not FFMPEG:
         return
     path = Path(title["path"])
@@ -279,9 +287,7 @@ def _cache_one_track(title, title_idx, audio_idx):
         return
 
     track = tracks[audio_idx]
-    passthrough = (track.get("codec") or "").lower() in (
-        "aac", "mp3", "opus", "vorbis", "flac"
-    )
+    passthrough = (track.get("codec") or "").lower() in BROWSER_AUDIO_CODECS
     suffix = "copy" if passthrough else "aac"
 
     cache_dir = path.parent / ".remux"
@@ -290,30 +296,31 @@ def _cache_one_track(title, title_idx, audio_idx):
 
     lock = _get_cache_lock(cache_file)
     if not lock.acquire(blocking=False):
-        log.info(f"  Cache-track: '{path.name}' a{audio_idx} already in progress")
+        log.info(f"Cache-track: '{path.name}' a{audio_idx} already in progress")
         return
     try:
-        log.info(f"  Cache-track: remuxing '{path.name}' audio {audio_idx}...")
+        log.info(f"Cache-track: remuxing '{path.name}' audio {audio_idx}...")
         if _remux_to_cache(path, cache_file, audio_idx, passthrough):
             mb = cache_file.stat().st_size // (1024 * 1024)
-            log.info(f"  Cache-track: '{path.name}' a{audio_idx} ready ({mb} MB)")
+            log.info(f"Cache-track: '{path.name}' a{audio_idx} ready ({mb} MB)")
         else:
-            log.warning(f"  Cache-track: '{path.name}' a{audio_idx} failed")
+            log.warning(f"Cache-track: '{path.name}' a{audio_idx} failed")
     finally:
         lock.release()
 
 
 # ---------- Library discovery ----------
 
-def _scan_dvd_folders(root: Path):
-    """
-    Recursively find every folder under `root` that directly contains at least
-    one video file.  Does NOT follow symlinks and never descends into dotted
-    or skip-listed directories.
+def _is_skipped_dir(name: str) -> bool:
+    lower = name.lower()
+    if name.startswith(".") or name in SKIP_DIR_NAMES:
+        return True
+    if lower.endswith(".images") or ".vobsub.images" in lower:
+        return True
+    return False
 
-    Returns a list of (relative_name, absolute_path) tuples.  relative_name
-    always uses "/" as separator, e.g. "Action/Hyperdrive(2006) disc_1".
-    """
+
+def _scan_dvd_folders(root: Path):
     root = Path(root).resolve()
     found = []
     if not root.is_dir():
@@ -332,11 +339,10 @@ def _scan_dvd_folders(root: Path):
         subdirs = []
         for entry in entries:
             name = entry.name
-            if name.startswith(".") or name in SKIP_DIR_NAMES:
+            if _is_skipped_dir(name):
                 continue
             try:
                 if entry.is_symlink():
-                    # Never follow symlinks: this is the #1 escape vector.
                     continue
                 if entry.is_file(follow_symlinks=False):
                     if Path(name).suffix.lower() in VIDEO_EXTENSIONS:
@@ -346,8 +352,6 @@ def _scan_dvd_folders(root: Path):
             except OSError:
                 continue
 
-        # A top-level dir that only contains videos is not a "DVD" — the
-        # library contract is that DVDs are folders, not bare files.
         if has_video and rel_parts:
             found.append(("/".join(rel_parts), dir_path))
 
@@ -359,23 +363,6 @@ def _scan_dvd_folders(root: Path):
 
 
 def get_library():
-    """
-    Return the full library structure.
-
-    Shape:
-    {
-      "dvds":   [ <flat list of every DVD> ],
-      "genres": [ {"name": ..., "label": ..., "dvds": [...]}, ... ]
-    }
-
-    Each DVD entry:
-      name          "Action/Hyperdrive(2006) disc_1"   (relative path, / separators)
-      display_name  "Hyperdrive(2006) disc_1"
-      genre         "Action"   ("" if the DVD sits directly under dvds/)
-      subpath       ""         (any intermediate dirs between genre and DVD)
-      path          absolute filesystem path
-      cover         "/api/dvd/cover/Action/Hyperdrive(2006)%20disc_1" or null
-    """
     DVD_FOLDER.mkdir(exist_ok=True)
     root = DVD_FOLDER.resolve()
 
@@ -386,8 +373,6 @@ def get_library():
         display_name = parts[-1]
         subpath = "/".join(parts[1:-1]) if len(parts) > 2 else ""
         cover = abs_path / "cover.png"
-        # quote() with default safe="/" preserves path separators but
-        # URL-encodes spaces, parens, etc.
         cover_url = f"/api/dvd/cover/{quote(rel_name)}" if cover.is_file() else None
         dvds.append({
             "name": rel_name,
@@ -398,7 +383,6 @@ def get_library():
             "cover": cover_url,
         })
 
-    # Group by genre, keeping the (already-sorted) scan order.
     by_genre = {}
     for dvd in dvds:
         by_genre.setdefault(dvd["genre"], []).append(dvd)
@@ -415,13 +399,6 @@ def get_library():
 # ---------- Probing ----------
 
 def _guess_lang_from_filename(name):
-    """Extract a language code from a sidecar subtitle filename.
-
-    Handles:
-      <stem>.<lang>.<ext>
-      <stem>.<lang>.<forced|sdh|hi>.<ext>
-      <stem>.<lang>[.t<id>].vobsub.vtt      (our PNG+WebVTT convention)
-    """
     lower = name.lower()
     m = re.search(r"\.([a-z]{2,3})(?:\.(?:forced|sdh|hi))?\.(?:srt|vtt)$", lower)
     if m:
@@ -467,20 +444,14 @@ def _probe_subtitles(mkv_path, streams):
             if f.parent.name in (".subtitles", ".subtitle_work", ".remux"):
                 continue
 
-            # Our PNG+WebVTT output uses the ".vobsub.vtt" suffix. Detect it
-            # so the frontend can switch to the image-cue renderer.
             is_vobsub_vtt = f.name.lower().endswith(".vobsub.vtt")
-
-            # Also mark any VTT that contains image references (defensive:
-            # users might rename files, or use a different ripper).
             if not is_vobsub_vtt and ext == ".vtt":
                 try:
                     sample = f.read_text(encoding="utf-8", errors="replace")[:4096]
                     if (".png" in sample.lower()
                             and ("--> " in sample)
                             and ("<img" in sample.lower()
-                                 or re.search(r'^\s*\S+\.png\s*$',
-                                              sample, re.MULTILINE))):
+                                 or re.search(r'^\s*\S+\.png\s*$', sample, re.MULTILINE))):
                         is_vobsub_vtt = True
                 except Exception:
                     pass
@@ -494,8 +465,7 @@ def _probe_subtitles(mkv_path, streams):
                 "title": f.name,
                 "playable": True,
                 "image_based": is_vobsub_vtt,
-                "note": ("Image-based cues (PNG) — rendered as overlay"
-                         if is_vobsub_vtt else ""),
+                "note": ("Image-based cues (PNG) — rendered as overlay" if is_vobsub_vtt else ""),
             })
 
     return tracks
@@ -581,19 +551,27 @@ def probe_media(file_path):
 
 def get_titles(dvd_folder):
     titles = []
-    for f in sorted(Path(dvd_folder).iterdir()):
-        if not f.is_file() or f.suffix.lower() not in VIDEO_EXTENSIONS:
-            continue
-        info = probe_media(f)
-        titles.append({
-            "file": f.name,
-            "path": str(f),
-            "duration": info["duration"],
-            "size": f.stat().st_size,
-            "chapters": info["chapters"],
-            "subtitles": info["subtitles"],
-            "audio": info["audio"],
-        })
+    dvd_path = Path(dvd_folder)
+
+    for root, dirs, files in os.walk(dvd_path):
+        dirs[:] = [d for d in dirs if not _is_skipped_dir(d)]
+
+        for fname in sorted(files):
+            f = Path(root) / fname
+            if f.suffix.lower() not in VIDEO_EXTENSIONS:
+                continue
+            info = probe_media(f)
+            rel_file = str(f.relative_to(dvd_path)).replace("\\", "/")
+            titles.append({
+                "file": rel_file,
+                "path": str(f),
+                "duration": info["duration"],
+                "size": f.stat().st_size,
+                "chapters": info["chapters"],
+                "subtitles": info["subtitles"],
+                "audio": info["audio"],
+            })
+            
     titles.sort(key=lambda t: t["duration"], reverse=True)
     return titles
 
@@ -610,29 +588,11 @@ def srt_to_vtt(srt_text):
     return "WEBVTT\n\n" + body
 
 
-# ---------- Image-based WebVTT helpers ----------
-
-# Matches a bare PNG path on its own line, or a PNG path inside an <img src="">.
-# We only rewrite *relative* paths; absolute URLs, root-relative paths, and
-# data: URIs are left alone.
-_BARE_PNG_LINE_RE = re.compile(r'^[^\r\n]*?\.png[^\r\n]*$',
-                               re.MULTILINE | re.IGNORECASE)
-_IMG_SRC_RE = re.compile(r'<img\s+src=(["\'])([^"\']+)\1',
-                         re.IGNORECASE)
+_BARE_PNG_LINE_RE = re.compile(r'^[^\r\n]*?\.png[^\r\n]*$', re.MULTILINE | re.IGNORECASE)
+_IMG_SRC_RE = re.compile(r'<img\s+src=(["\'])([^"\']+)\1', re.IGNORECASE)
 
 
 def _rewrite_vtt_image_paths(vtt_text: str, title_idx: int) -> str:
-    """
-    Rewrite relative PNG references inside a WebVTT file into absolute
-    /api/dvd/subtitle-image/<title_idx>/... URLs, so the browser can fetch
-    them even though the VTT itself was served from
-    /api/dvd/subtitle/<idx>/<sub_id>.
-
-    Handles three cue payload forms produced by ripper.py:
-      1. Plain relative path:   images/0001.png
-      2. <img src="..."> wrapper
-      3. data:image/png;base64,...   (left unchanged)
-    """
     prefix = f"/api/dvd/subtitle-image/{title_idx}/"
 
     def _absolute(path: str) -> str:
@@ -643,37 +603,119 @@ def _rewrite_vtt_image_paths(vtt_text: str, title_idx: int) -> str:
             return p
         return prefix + quote(p, safe="/")
 
-    # 1. <img src="..."> wrappers
     def _img_repl(m):
         q, p = m.group(1), m.group(2)
         return f'<img src={q}{_absolute(p)}{q}'
 
     vtt_text = _IMG_SRC_RE.sub(_img_repl, vtt_text)
 
-    # 2. Bare PNG path on its own line
     def _line_repl(m):
         return _absolute(m.group(0))
 
-    vtt_text = _BARE_PNG_LINE_RE.sub(_line_repl, vtt_text)
-
-    return vtt_text
+    return _BARE_PNG_LINE_RE.sub(_line_repl, vtt_text)
 
 
-# ---------- Routes ----------
+# ---------- User & Watch Progress Routes ----------
+
+@app.route("/api/users", methods=["GET", "POST"])
+def handle_users():
+    """GET lists all registered profiles. POST adds a new profile immediately."""
+    if request.method == "POST":
+        payload = request.json or {}
+        user = _sanitize_username(payload.get("username", ""))
+
+        if user == "Guest":
+            return jsonify({"error": "Cannot create Guest profile"}), 400
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT OR IGNORE INTO users (username) VALUES (?)", (user,))
+
+        return jsonify({"success": True, "username": user})
+
+    # GET method
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT username FROM users WHERE username != 'Guest' ORDER BY username ASC")
+        users = [row[0] for row in cursor.fetchall()]
+
+    return jsonify({"users": ["Guest"] + users})
+
+
+@app.route("/api/progress", methods=["GET"])
+def get_progress():
+    user = _sanitize_username(request.args.get("user", "Guest"))
+    dvd_raw = request.args.get("dvd", "")
+
+    # Guest profile has no saved progress
+    if user == "Guest":
+        return jsonify({})
+
+    dvd_path = _safe_dvd_path(dvd_raw)
+    if not dvd_path:
+        return jsonify({}), 400
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT title_idx, position, duration, watched FROM user_progress WHERE username=? AND dvd_name=?",
+            (user, dvd_raw)
+        )
+        data = {row["title_idx"]: dict(row) for row in cursor.fetchall()}
+    return jsonify(data)
+
+
+@app.route("/api/progress", methods=["POST"])
+def save_progress():
+    payload = request.json or {}
+    user = _sanitize_username(payload.get("user", "Guest"))
+
+    if user == "Guest":
+        return jsonify({"success": True, "saved": False, "reason": "Guest profile does not record progress"})
+
+    dvd_raw = payload.get("dvd", "")
+    dvd_path = _safe_dvd_path(dvd_raw)
+    if not dvd_path:
+        return jsonify({"error": "Invalid DVD path"}), 400
+
+    try:
+        title_idx = int(payload.get("title_idx"))
+        pos = float(payload.get("position", 0.0))
+        dur = float(payload.get("duration", 0.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid numeric parameter"}), 400
+
+    if title_idx < 0 or pos < 0 or dur < 0 or pos > 86400 or dur > 86400:
+        return jsonify({"error": "Value out of bounds"}), 400
+
+    watched = 1 if (dur > 0 and (pos / dur) >= 0.90) else 0
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("INSERT OR IGNORE INTO users (username) VALUES (?)", (user,))
+        conn.execute("""
+            INSERT INTO user_progress (username, dvd_name, title_idx, position, duration, watched, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(username, dvd_name, title_idx) DO UPDATE SET
+                position = excluded.position,
+                duration = excluded.duration,
+                watched = MAX(watched, excluded.watched),
+                updated_at = CURRENT_TIMESTAMP
+        """, (user, dvd_raw, title_idx, pos, dur, watched))
+
+    return jsonify({"success": True, "watched": bool(watched)})
+
+
+# ---------- Core DVD Routes ----------
 
 @app.route("/api/dvds", methods=["GET"])
 def list_dvds():
-    """Full library: flat DVD list + genre grouping."""
     return jsonify(get_library())
 
 
 @app.route("/api/dvd/cover/<path:dvd_name>", methods=["GET"])
 def get_dvd_cover(dvd_name):
-    """Return cover.png from a DVD folder. dvd_name may contain slashes."""
     dvd_path = _safe_dvd_path(dvd_name)
-    if dvd_path is None:
-        return jsonify({"error": "Invalid DVD path"}), 400
-    if not dvd_path.is_dir():
+    if not dvd_path or not dvd_path.is_dir():
         return jsonify({"error": "DVD folder not found"}), 404
     cover = dvd_path / "cover.png"
     if not cover.is_file():
@@ -684,7 +726,7 @@ def get_dvd_cover(dvd_name):
 @app.route("/api/dvd/load/<path:dvd_name>", methods=["POST"])
 def load_dvd(dvd_name):
     dvd_path = _safe_dvd_path(dvd_name)
-    if dvd_path is None or not dvd_path.is_dir():
+    if not dvd_path or not dvd_path.is_dir():
         log.warning(f"Load failed: invalid or missing folder {dvd_name!r}")
         return jsonify({"error": "DVD folder not found"}), 404
 
@@ -719,8 +761,7 @@ def cache_track(title_idx, audio_idx):
     tracks = title.get("audio", [])
     if audio_idx <= 0 or audio_idx >= len(tracks):
         return jsonify({"started": False, "reason": "default or invalid track"})
-    log.info(f"cache_track: title={title_idx} audio={audio_idx} "
-             f"tracks={len(tracks)} dvd={current_dvd.get('title')!r}")
+
     if not FFMPEG:
         return jsonify({"error": "ffmpeg not available"}), 500
 
@@ -749,7 +790,7 @@ def cache_status(title_idx, audio_idx):
 
     path = Path(title["path"])
     src_codec = (tracks[audio_idx].get("codec") or "").lower()
-    passthrough = src_codec in ("aac", "mp3", "opus", "vorbis", "flac")
+    passthrough = src_codec in BROWSER_AUDIO_CODECS
     suffix = "copy" if passthrough else "aac"
     cache_file = path.parent / ".remux" / f"{path.stem}.a{audio_idx}.{suffix}.mp4"
 
@@ -769,7 +810,6 @@ def get_current_dvd():
 
 @app.route("/api/dvd/cache/info", methods=["GET"])
 def cache_info():
-    """Report cache contents for every DVD, recursively discovered."""
     root = Path(DVD_FOLDER).resolve()
     if not root.exists():
         return jsonify({"total_files": 0, "total_bytes": 0, "total_mb": 0, "dvds": []})
@@ -826,7 +866,6 @@ def cache_info():
 
 @app.route("/api/dvd/cache/clear", methods=["POST"])
 def clear_cache():
-    """Clear cache. ?dvd=NAME for one DVD (may contain slashes); otherwise all."""
     root = Path(DVD_FOLDER).resolve()
     if not root.exists():
         return jsonify({"removed": 0, "mb_freed": 0, "locked": [], "errors": []})
@@ -867,9 +906,7 @@ def clear_cache():
 
     freed_mb = bytes_freed // (1024 * 1024)
     scope = f"'{target}'" if target else "all DVDs"
-    log.info(f"Cache clear ({scope}): removed {removed} file(s), freed {freed_mb} MB"
-             + (f", {len(locked)} locked" if locked else "")
-             + (f", {len(errors)} error(s)" if errors else ""))
+    log.info(f"Cache clear ({scope}): removed {removed} file(s), freed {freed_mb} MB")
 
     response = {
         "removed": removed,
@@ -900,10 +937,7 @@ def select_title(title_idx):
     t = current_dvd["titles"][title_idx]
 
     dur_min = t["duration"] / 60.0 if t["duration"] else 0
-    log.info(f"Selected title {title_idx}: '{t['file']}' "
-             f"({dur_min:.1f} min, {len(t.get('audio', []))} audio, "
-             f"{len(t.get('subtitles', []))} sub) "
-             f"[from {_client_ip()}]")
+    log.info(f"Selected title {title_idx}: '{t['file']}' ({dur_min:.1f} min) [from {_client_ip()}]")
 
     return jsonify({
         "title_idx": title_idx,
@@ -926,7 +960,6 @@ def stream_title(title_idx):
     title = current_dvd["titles"][title_idx]
     path = Path(title["path"])
     if not path.exists():
-        log.warning(f"Stream failed: file missing {path}")
         return jsonify({"error": "File not found"}), 404
 
     try:
@@ -953,7 +986,7 @@ def stream_title(title_idx):
 
     track = tracks[audio_idx] if audio_idx < len(tracks) else {}
     src_codec = (track.get("codec") or "").lower()
-    audio_passthrough = src_codec in ("aac", "mp3", "opus", "vorbis", "flac")
+    audio_passthrough = src_codec in BROWSER_AUDIO_CODECS
 
     cache_dir = path.parent / ".remux"
     cache_dir.mkdir(exist_ok=True)
@@ -963,86 +996,32 @@ def stream_title(title_idx):
     lock = _get_cache_lock(cache_file)
     with lock:
         if _is_cache_valid(cache_file):
-            log.info(f"Serving cached: {cache_file.name}")
             return send_file(cache_file, mimetype="video/mp4", conditional=True)
-        log.info(f"Stream: remuxing title {title_idx} audio {audio_idx}...")
         if not _remux_to_cache(path, cache_file, audio_idx, audio_passthrough):
             return jsonify({"error": "Remux failed"}), 500
 
     return send_file(cache_file, mimetype="video/mp4", conditional=True)
 
-@app.route("/api/dvd/vobsub-image/<int:title_idx>/<path:relpath>", methods=["GET"])
-def get_vobsub_image(title_idx, relpath):
-    """Serve a PNG from a title's <stem>.vobsub.images/ directory."""
+
+@app.route("/api/dvd/subtitle-image/<int:title_idx>/<path:rel_path>", methods=["GET"])
+def get_subtitle_image(title_idx, rel_path):
     if not current_dvd["dvd_path"]:
         return jsonify({"error": "No DVD loaded"}), 404
     if not (0 <= title_idx < len(current_dvd["titles"])):
         return jsonify({"error": "Invalid title index"}), 400
 
     title = current_dvd["titles"][title_idx]
-    mkv_path = Path(title["path"]).resolve()
-    parent = mkv_path.parent
+    mkv_dir = Path(title["path"]).parent.resolve()
 
-    relpath = relpath.replace("\\", "/").strip("/")
-    if not relpath or ".." in relpath.split("/") or ":" in relpath:
-        return jsonify({"error": "Invalid path"}), 400
-    if not relpath.lower().endswith(".png"):
-        return jsonify({"error": "Not a PNG"}), 400
+    if not rel_path.lower().endswith(".png"):
+        return jsonify({"error": "Only PNG images permitted"}), 400
 
-    try:
-        candidate = (parent / relpath).resolve()
-    except (OSError, RuntimeError):
-        return jsonify({"error": "Invalid path"}), 400
-    try:
-        candidate.relative_to(parent)
-    except ValueError:
-        return jsonify({"error": "Invalid path"}), 400
-
-    if not candidate.is_file():
-        return jsonify({"error": "Image not found"}), 404
-    return send_file(candidate, mimetype="image/png")
-
-@app.route("/api/dvd/subtitle-image/<int:title_idx>/<path:filename>", methods=["GET"])
-def get_subtitle_image(title_idx, filename):
-    """Serve a PNG/JPG image used as a bitmap-subtitle overlay."""
-    if not current_dvd["dvd_path"]:
-        return jsonify({"error": "No DVD loaded"}), 404
-    if not (0 <= title_idx < len(current_dvd["titles"])):
-        return jsonify({"error": "Invalid title index"}), 400
-
-    # Reject traversal attempts
-    if (not filename or filename.startswith("/")
-            or "\\" in filename
-            or any(part in ("", ".", "..") for part in filename.split("/"))):
-        return jsonify({"error": "Invalid filename"}), 400
-
-    title = current_dvd["titles"][title_idx]
-    mkv_path = Path(title["path"])
-    base_dir = mkv_path.parent.resolve()
-
-    allowed = {
-        ".png":  "image/png",
-        ".jpg":  "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-        ".gif":  "image/gif",
-        ".bmp":  "image/bmp",
-    }
-    suffix = Path(filename).suffix.lower()
-    if suffix not in allowed:
-        return jsonify({"error": "Unsupported image type"}), 400
-
-    try:
-        target = (base_dir / filename).resolve()
-        target.relative_to(base_dir)
-    except (OSError, ValueError):
-        return jsonify({"error": "Invalid path"}), 400
-
-    if not target.is_file():
-        log.warning(f"Subtitle image missing: {target}")
+    target = _safe_dvd_path(rel_path, base_dir=mkv_dir)
+    if not target or not target.is_file():
         return jsonify({"error": "Image not found"}), 404
 
-    return send_file(target, mimetype=allowed[suffix], conditional=True)
+    return send_file(target, mimetype="image/png", conditional=True)
+
 
 @app.route("/api/dvd/subtitle/<int:title_idx>/<path:sub_id>", methods=["GET"])
 def get_subtitle(title_idx, sub_id):
@@ -1056,129 +1035,55 @@ def get_subtitle(title_idx, sub_id):
     tracks = title.get("subtitles", [])
     track = next((t for t in tracks if t["id"] == sub_id), None)
     if not track:
-        available = [t["id"] for t in tracks]
-        log.warning(f"Subtitle 404: requested={sub_id!r} title={title_idx} "
-                    f"available={available}")
-        return jsonify({
-            "error": "Subtitle not found",
-            "requested": sub_id,
-            "available": available,
-        }), 404
+        return jsonify({"error": "Subtitle not found"}), 404
 
     if track["source"] == "external":
         src = mkv_path.parent / track["filename"]
         if not src.exists():
-            log.warning(f"Sidecar subtitle missing: {src}")
             return jsonify({"error": "Subtitle file missing"}), 404
 
         if src.suffix.lower() == ".vtt":
-            # Image-based VTTs need their relative PNG paths rewritten to
-            # absolute URLs, because the browser resolves them against this
-            # response's URL, not against the file on disk.
             if track.get("image_based"):
                 try:
                     text = src.read_text(encoding="utf-8", errors="replace")
                 except Exception as e:
-                    log.error(f"Could not read {src}: {e}")
                     return jsonify({"error": f"Could not read subtitle: {e}"}), 500
                 text = _rewrite_vtt_image_paths(text, title_idx)
                 return Response(text, content_type="text/vtt; charset=utf-8")
             return send_file(src, mimetype="text/vtt")
 
-        # .srt sidecar -> convert to VTT
         try:
             text = src.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
-            log.error(f"Could not read {src}: {e}")
             return jsonify({"error": f"Could not read subtitle: {e}"}), 500
         return Response(srt_to_vtt(text), content_type="text/vtt; charset=utf-8")
 
     if not track.get("playable"):
-        return jsonify({
-            "error": (
-                f"Subtitle codec '{track['codec']}' is bitmap-based and cannot "
-                "be shown in a browser. Extract it with OCR first."
-            )
-        }), 415
+        return jsonify({"error": "Bitmap subtitle codec is not renderable directly in browser"}), 415
 
     if not FFMPEG:
-        return jsonify({"error": "ffmpeg not found — cannot extract embedded subtitles"}), 500
+        return jsonify({"error": "ffmpeg not found"}), 500
 
     cache_dir = mkv_path.parent / ".subtitles"
     cache_dir.mkdir(exist_ok=True)
     cache_file = cache_dir / f"{mkv_path.stem}.stream{track['stream_index']}.vtt"
 
     if not cache_file.exists() or cache_file.stat().st_size == 0:
-        log.info(f"Extracting embedded subtitle stream {track['stream_index']} "
-                 f"from '{mkv_path.name}'...")
         try:
             result = subprocess.run(
-                [FFMPEG, "-y",
-                 "-i", str(mkv_path),
+                [FFMPEG, "-y", "-i", str(mkv_path),
                  "-map", f"0:{track['stream_index']}",
-                 "-c:s", "webvtt",
-                 str(cache_file)],
+                 "-c:s", "webvtt", str(cache_file)],
                 capture_output=True, text=True, encoding="utf-8",
                 errors="replace", timeout=120,
             )
-        except subprocess.TimeoutExpired:
-            log.error("Subtitle extraction timed out")
-            return jsonify({"error": "Extraction timed out"}), 500
         except Exception as e:
-            log.error(f"Subtitle extraction failed: {e}")
             return jsonify({"error": f"Extraction failed: {e}"}), 500
 
         if result.returncode != 0 or not cache_file.exists():
-            log.error(f"Subtitle extraction failed (ffmpeg {result.returncode}): "
-                      f"{result.stderr[-300:]}")
-            return jsonify({
-                "error": "Failed to extract subtitle stream",
-                "detail": result.stderr[-300:],
-            }), 500
+            return jsonify({"error": "Failed to extract subtitle stream"}), 500
 
     return send_file(cache_file, mimetype="text/vtt")
-
-
-@app.route("/api/dvd/subtitle-image/<int:title_idx>/<path:rel_path>", methods=["GET"])
-def get_subtitle_image(title_idx, rel_path):
-    """
-    Serve a single PNG that belongs to an image-based VTT subtitle track.
-
-    rel_path is relative to the title's own folder (the MKV's parent). The
-    resolution is sandboxed: the final path must stay inside that folder,
-    must end in .png, and must not contain traversal segments.
-    """
-    if not current_dvd["dvd_path"]:
-        return jsonify({"error": "No DVD loaded"}), 404
-    if not (0 <= title_idx < len(current_dvd["titles"])):
-        return jsonify({"error": "Invalid title index"}), 400
-
-    title = current_dvd["titles"][title_idx]
-    mkv_dir = Path(title["path"]).parent.resolve()
-
-    # Reject anything obviously wrong before touching the filesystem.
-    if not rel_path or ".." in rel_path.split("/") or rel_path.startswith(("/", "\\")):
-        return jsonify({"error": "Invalid path"}), 400
-    if not rel_path.lower().endswith(".png"):
-        return jsonify({"error": "Not a PNG"}), 400
-
-    try:
-        candidate = (mkv_dir / rel_path).resolve()
-    except (OSError, RuntimeError):
-        return jsonify({"error": "Invalid path"}), 400
-
-    # Final sandbox check: the resolved path must still be inside mkv_dir.
-    try:
-        candidate.relative_to(mkv_dir)
-    except ValueError:
-        log.warning(f"Subtitle image escapes title folder: {rel_path!r}")
-        return jsonify({"error": "Invalid path"}), 400
-
-    if not candidate.is_file():
-        log.warning(f"Subtitle image not found: {candidate}")
-        return jsonify({"error": "Image not found"}), 404
-
-    return send_file(candidate, mimetype="image/png", conditional=True)
 
 
 @app.route("/<path:filename>", methods=["GET"])
@@ -1187,15 +1092,11 @@ def static_file(filename):
     suffix = Path(filename).suffix.lower()
     if suffix not in allowed:
         return jsonify({"error": "Not found"}), 404
-    if ".." in filename or filename.startswith("/") or "\\" in filename:
+
+    path = _safe_dvd_path(filename, base_dir=BASE_DIR)
+    if not path or not path.is_file():
         return jsonify({"error": "Not found"}), 404
-    path = (BASE_DIR / filename).resolve()
-    try:
-        path.relative_to(BASE_DIR)
-    except ValueError:
-        return jsonify({"error": "Not found"}), 404
-    if not path.is_file():
-        return jsonify({"error": "Not found"}), 404
+
     mimetypes = {
         ".css": "text/css",
         ".js": "application/javascript",
