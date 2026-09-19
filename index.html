@@ -1127,17 +1127,29 @@
             }
         }
 
+        // --- Stream Offset & Position Tracker ---
+        let streamTimeOffset = 0;
+
+        function getRealCurrentTime() {
+            const video = document.getElementById("videoPlayer");
+            return streamTimeOffset + (video ? (video.currentTime || 0) : 0);
+        }
+
         async function saveProgress(force = false) {
             if (currentUser === "Guest") return;
 
             const video = document.getElementById("videoPlayer");
-            if (!video || !currentDVD || !video.duration) return;
+            if (!video || !currentDVD) return;
 
-            const pos = video.currentTime || 0;
+            const pos = getRealCurrentTime();
             if (!force && Math.abs(pos - lastSavedPos) < 5) return;
             lastSavedPos = pos;
 
-            const dur = video.duration;
+            const dur = (currentDVD.titles && currentDVD.titles[currentTitleIdx])
+                ? currentDVD.titles[currentTitleIdx].duration
+                : (video.duration || 0);
+
+            if (!dur) return;
             const isWatched = (pos / dur) >= 0.90;
 
             currentDVDProgress[currentTitleIdx] = {
@@ -1617,6 +1629,7 @@
         }
 
         async function selectTitle(idx) {
+            streamTimeOffset = 0;
             try {
                 const response = await fetch(`${API_URL}/dvd/title/${idx}`, { method: "POST" });
                 if (!response.ok) {
@@ -1766,17 +1779,35 @@
             applyAudioTrack(audioIdx);
         }
 
-        function applyAudioTrack(audioIdx) {
+        async function applyAudioTrack(audioIdx, forcePos = null) {
             const video = document.getElementById("videoPlayer");
             if (!video) return;
 
             const wasPlaying = !video.paused && !video.ended;
-            const pos = video.currentTime || 0;
+            const pos = forcePos !== null ? forcePos : getRealCurrentTime();
+
+            let isCached = false;
+            if (audioIdx > 0) {
+                try {
+                    const statusRes = await fetch(`${API_URL}/dvd/cache-status/${currentTitleIdx}/${audioIdx}`);
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        isCached = !!statusData.ready;
+                    }
+                } catch (e) {}
+            } else {
+                isCached = true;
+            }
 
             const base = `${API_URL}/dvd/stream/${currentTitleIdx}`;
-            const url = audioIdx === 0 ? base : `${base}?audio=${audioIdx}`;
+            let url = base;
 
-            if (audioIdx > 0) {
+            if (audioIdx === 0 || isCached) {
+                streamTimeOffset = 0;
+                if (audioIdx > 0) url += `?audio=${audioIdx}`;
+            } else {
+                streamTimeOffset = pos;
+                url += `?audio=${audioIdx}&startTime=${Math.floor(pos)}`;
                 fetch(`${API_URL}/dvd/cache-track/${currentTitleIdx}/${audioIdx}`, { method: "POST" });
                 showMessage("Switching audio track…", "info");
             }
@@ -1787,7 +1818,16 @@
 
             const restore = () => {
                 video.removeEventListener("loadedmetadata", restore);
-                if (pos > 0) video.currentTime = pos;
+                if (streamTimeOffset === 0 && pos > 0) {
+                    video.currentTime = pos;
+                }
+
+                // Re-load selected subtitles after video element reloads
+                const subSelect = document.getElementById("subtitleSelect");
+                if (subSelect && subSelect.value !== "off") {
+                    setSubtitle(subSelect.value);
+                }
+
                 if (wasPlaying) video.play().catch(() => {});
             };
             video.addEventListener("loadedmetadata", restore);
@@ -1935,7 +1975,8 @@
             const video = document.getElementById("videoPlayer");
             if (!video) return;
 
-            const t = video.currentTime || 0;
+            // Use true movie time (offset + video.currentTime)
+            const t = getRealCurrentTime();
             let idx = -1;
             for (let i = 0; i < vobsubCues.length; i++) {
                 if (t < vobsubCues[i].start) break;
@@ -1970,7 +2011,6 @@
                 vobsubOverlay.style.display = "block";
             }
         }
-
         async function loadVobsubSubtitle(track) {
             const url = `${API_URL}/dvd/subtitle/${currentTitleIdx}/${encodeURIComponent(track.id)}`;
             try {
@@ -2038,6 +2078,14 @@
                 trackEl.default = true;
 
                 trackEl.addEventListener("load", () => {
+                    const tt = trackEl.track;
+                    // Shift cue timestamps if playing a offset live stream
+                    if (tt && tt.cues && streamTimeOffset > 0) {
+                        for (let i = 0; i < tt.cues.length; i++) {
+                            tt.cues[i].startTime = Math.max(0, tt.cues[i].startTime - streamTimeOffset);
+                            tt.cues[i].endTime = Math.max(0, tt.cues[i].endTime - streamTimeOffset);
+                        }
+                    }
                     for (let i = 0; i < video.textTracks.length; i++) {
                         video.textTracks[i].mode = "showing";
                     }
@@ -2252,15 +2300,22 @@
             });
 
             function updateProgress() {
-                const dur = video.duration;
+                const video = document.getElementById("videoPlayer");
+                if (!video) return;
+
+                const realTime = getRealCurrentTime();
+                const dur = (currentDVD && currentDVD.titles && currentDVD.titles[currentTitleIdx])
+                    ? currentDVD.titles[currentTitleIdx].duration
+                    : video.duration;
+
                 if (!dur || !isFinite(dur)) {
-                    timeDisplay.textContent = `${fmtTime(video.currentTime)} / 0:00`;
+                    timeDisplay.textContent = `${fmtTime(realTime)} / 0:00`;
                     return;
                 }
-                const pct = Math.max(0, Math.min(100, (video.currentTime / dur) * 100));
+                const pct = Math.max(0, Math.min(100, (realTime / dur) * 100));
                 playedBar.style.width = pct + "%";
                 progressKnob.style.left = pct + "%";
-                timeDisplay.textContent = `${fmtTime(video.currentTime)} / ${fmtTime(dur)}`;
+                timeDisplay.textContent = `${fmtTime(realTime)} / ${fmtTime(dur)}`;
             }
 
             video.addEventListener("timeupdate", () => {
@@ -2275,10 +2330,23 @@
 
             let seeking = false;
             function seekFromEvent(e) {
+                const video = document.getElementById("videoPlayer");
+                if (!video) return;
+
+                const dur = (currentDVD && currentDVD.titles && currentDVD.titles[currentTitleIdx])
+                    ? currentDVD.titles[currentTitleIdx].duration
+                    : video.duration;
+
+                if (!dur || !isFinite(dur)) return;
+
                 const rect = progressBar.getBoundingClientRect();
                 let pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                if (video.duration && isFinite(video.duration)) {
-                    video.currentTime = pct * video.duration;
+                const targetTime = pct * dur;
+
+                if (streamTimeOffset > 0) {
+                    applyAudioTrack(loadedAudioIdx, targetTime);
+                } else {
+                    video.currentTime = targetTime;
                     updateProgress();
                 }
             }
@@ -2307,6 +2375,40 @@
                 if (document.fullscreenElement) document.exitFullscreen();
                 else player.requestFullscreen();
             };
+            // --- Control Auto-Hiding Logic ---
+            let controlsTimeout = null;
+
+            function hideControls() {
+                // Only hide controls if the video is playing and cover isn't visible
+                if (!video.paused && !video.ended && !coverVisible) {
+                    player.classList.add("controls-hidden");
+                }
+            }
+
+            function resetControlsTimer() {
+                player.classList.remove("controls-hidden");
+                clearTimeout(controlsTimeout);
+                if (!video.paused && !video.ended) {
+                    controlsTimeout = setTimeout(hideControls, 3000); // Hides after 3s
+                }
+            }
+
+            // Show controls on mouse move over video container
+            player.addEventListener("mousemove", resetControlsTimer);
+
+            // Hide immediately if mouse leaves the video player while playing
+            player.addEventListener("mouseleave", () => {
+                if (!video.paused && !video.ended) {
+                    hideControls();
+                }
+            });
+
+            // Reset timer state when play/pause state changes
+            video.addEventListener("play", resetControlsTimer);
+            video.addEventListener("pause", () => {
+                clearTimeout(controlsTimeout);
+                player.classList.remove("controls-hidden");
+            });
         }
 
         window.addEventListener("load", () => {

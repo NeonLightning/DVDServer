@@ -946,7 +946,6 @@ def select_title(title_idx):
         "stream_url": f"/api/dvd/stream/{title_idx}",
     })
 
-
 @app.route("/api/dvd/stream/<int:title_idx>", methods=["GET"])
 def stream_title(title_idx):
     if not current_dvd["dvd_path"]:
@@ -964,11 +963,16 @@ def stream_title(title_idx):
     except (TypeError, ValueError):
         audio_idx = 0
 
+    try:
+        start_time = float(request.args.get("startTime", "0"))
+    except (TypeError, ValueError):
+        start_time = 0.0
+
     tracks = title.get("audio", [])
     if audio_idx < 0 or audio_idx >= max(1, len(tracks)):
         audio_idx = 0
 
-    # Default track: serve directly
+    # Default track: serve directly with full byte-range support
     if audio_idx == 0:
         ext = path.suffix.lower()
         mimetype = {
@@ -991,7 +995,7 @@ def stream_title(title_idx):
     suffix = "copy" if audio_passthrough else "aac"
     cache_file = cache_dir / f"{path.stem}.a{audio_idx}.{suffix}.mp4"
 
-    # If static cache is ready, serve it with full byte-range support
+    # Static cached file ready: serve directly
     if _is_cache_valid(cache_file):
         return send_file(cache_file, mimetype="video/mp4", conditional=True)
 
@@ -1002,15 +1006,22 @@ def stream_title(title_idx):
         daemon=True,
     ).start()
 
-    # Instant playback via Fragmented MP4 (fMP4) pipe
+    # Instant live stream pipe starting from start_time
     cmd = [
         FFMPEG, "-y",
         "-analyzeduration", "1000000",
         "-probesize", "1000000",
+    ]
+
+    if start_time > 0:
+        cmd += ["-ss", str(start_time)]
+
+    cmd += [
         "-i", str(path),
         "-map", "0:v:0", "-map", f"0:a:{audio_idx}",
         "-c:v", "copy"
     ]
+
     if audio_passthrough:
         cmd += ["-c:a", "copy"]
     else:
@@ -1035,7 +1046,6 @@ def stream_title(title_idx):
             proc.kill()
 
     return Response(generate(), mimetype="video/mp4")
-
 
 @app.route("/api/dvd/subtitle-image/<int:title_idx>/<path:rel_path>", methods=["GET"])
 def get_subtitle_image(title_idx, rel_path):
